@@ -5,3 +5,4 @@ src/main/java/app/bl/Keyword.java
 src/main/java/app/da/GoogleConnector.java
 src/main/java/app/da/LocationRecognizer.java
 src/main/java/app/da/HTMLHandler.java
+src/main/java/app/Main.java
