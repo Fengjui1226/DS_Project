@@ -1,8 +1,0 @@
-src/main/java/app/bl/RankCalculator.java
-src/main/java/app/bl/PageNode.java
-src/main/java/app/bl/UserProfile.java
-src/main/java/app/bl/Keyword.java
-src/main/java/app/da/GoogleConnector.java
-src/main/java/app/da/LocationRecognizer.java
-src/main/java/app/da/HTMLHandler.java
-src/main/java/app/Main.java

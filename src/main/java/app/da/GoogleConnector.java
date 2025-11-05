@@ -1,4 +1,14 @@
 package app.da;
+
+import java.util.*;
+
 public class GoogleConnector {
-    // TODO: 擴充為實際搜尋；先用固定 URL 清單模擬
+    public static List<String> getSearchResults(String query) {
+        // TODO: 用固定資料模擬 Google 搜尋結果
+        return List.of(
+            "https://example.com/music",
+            "https://example.com/exhibition",
+            "https://example.com/gamefest"
+        );
+    }
 }
