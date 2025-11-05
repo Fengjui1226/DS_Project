@@ -1,9 +1,2 @@
-# DS_Project
-
-first try
-Annie try
-aaaa
-aaa
-a
-
-ahjfgkgr
+javac -d out $(find src/main/java -name "*.java")
+java -cp out app.Main

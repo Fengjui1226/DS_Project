@@ -1,0 +1,15 @@
+name: Java CI
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile
+        run: |
+          find src/main/java -name "*.java" > sources.txt
+          mkdir -p out
+          javac -d out @sources.txt
+      - name: Smoke run
+        run: |
+          java -cp out app.Main || true
