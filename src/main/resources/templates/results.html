@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>搜尋結果 - 活動搜尋引擎</title>
+    <style>
+        body {
+            font-family: 'Microsoft JhengHei', Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .search-box {
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+        .search-input {
+            width: 70%;
+            padding: 12px;
+            font-size: 16px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            margin-right: 10px;
+        }
+        .search-button {
+            padding: 12px 24px;
+            font-size: 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .search-button:hover {
+            background-color: #45a049;
+        }
+        .city-select {
+            margin-top: 10px;
+            padding: 8px;
+            font-size: 14px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .result-item {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            margin-bottom: 15px;
+        }
+        .result-title {
+            color: #1a0dab;
+            font-size: 18px;
+            margin-bottom: 5px;
+            text-decoration: none;
+        }
+        .result-title:hover {
+            text-decoration: underline;
+        }
+        .result-url {
+            color: #006621;
+            font-size: 14px;
+            margin-bottom: 5px;
+        }
+        .result-score {
+            color: #666;
+            font-size: 14px;
+        }
+        .result-city {
+            display: inline-block;
+            padding: 2px 8px;
+            background-color: #e9ecef;
+            border-radius: 3px;
+            margin-right: 10px;
+            font-size: 14px;
+        }
+        h1 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+        .no-results {
+            text-align: center;
+            padding: 30px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="search-box">
+            <form action="/search" method="get">
+                <input type="text" name="query" class="search-input" value="${query}" required>
+                <select name="city" class="city-select">
+                    <option value="台北" ${userCity == '台北' ? 'selected' : ''}>台北</option>
+                    <option value="新北" ${userCity == '新北' ? 'selected' : ''}>新北</option>
+                    <option value="桃園" ${userCity == '桃園' ? 'selected' : ''}>桃園</option>
+                    <option value="台中" ${userCity == '台中' ? 'selected' : ''}>台中</option>
+                    <option value="台南" ${userCity == '台南' ? 'selected' : ''}>台南</option>
+                    <option value="高雄" ${userCity == '高雄' ? 'selected' : ''}>高雄</option>
+                </select>
+                <button type="submit" class="search-button">搜尋</button>
+            </form>
+        </div>
+
+        <#if results?? && results?size gt 0>
+            <#list results as result>
+                <div class="result-item">
+                    <a href="${result.url}" class="result-title" target="_blank">${result.title}</a>
+                    <div>
+                        <#if result.city??><span class="result-city">${result.city}</span></#if>
+                        <span class="result-score">相關度: ${result.score?string("0.##")}</span>
+                    </div>
+                    <div class="result-url">${result.url}</div>
+                </div>
+            </#list>
+        <#else>
+            <div class="no-results">
+                <p>找不到相關結果</p>
+                <p>請檢查搜尋關鍵字或嘗試其他搜尋條件</p>
+            </div>
+        </#if>
+    </div>
+</body>
+</html>

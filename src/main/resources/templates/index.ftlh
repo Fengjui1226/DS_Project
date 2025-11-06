@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>活動搜尋引擎</title>
+    <style>
+        body {
+            font-family: 'Microsoft JhengHei', Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .search-box {
+            text-align: center;
+            padding: 40px 0;
+        }
+        .search-input {
+            width: 70%;
+            padding: 12px;
+            font-size: 16px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            margin-right: 10px;
+        }
+        .search-button {
+            padding: 12px 24px;
+            font-size: 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .search-button:hover {
+            background-color: #45a049;
+        }
+        .city-select {
+            margin-top: 10px;
+            padding: 8px;
+            font-size: 14px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>活動搜尋引擎</h1>
+        <div class="search-box">
+            <form action="/search" method="get">
+                <input type="text" name="query" class="search-input" placeholder="輸入搜尋關鍵字..." required>
+                <select name="city" class="city-select">
+                    <option value="台北" <#if userCity == "台北">selected</#if>>台北</option>
+                    <option value="新北" <#if userCity == "新北">selected</#if>>新北</option>
+                    <option value="桃園" <#if userCity == "桃園">selected</#if>>桃園</option>
+                    <option value="台中" <#if userCity == "台中">selected</#if>>台中</option>
+                    <option value="台南" <#if userCity == "台南">selected</#if>>台南</option>
+                    <option value="高雄" <#if userCity == "高雄">selected</#if>>高雄</option>
+                </select>
+                <button type="submit" class="search-button">搜尋</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>
