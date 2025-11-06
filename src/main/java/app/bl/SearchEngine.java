@@ -5,56 +5,51 @@ import java.util.*;
 
 public class SearchEngine {
 
-    public static List<PageNode> search(String query, UserProfile user) {
+    public static List<PageNode> search(String query, UserProfile user) throws Exception {
+        // 1) 打 Google CSE 拿結果
+        List<GoogleConnector.Result> results = GoogleConnector.search(query, 10);
+
+        // 2) 去重 & 轉 PageNode
+        Set<String> seenLinks = new HashSet<>();
         List<PageNode> pages = new ArrayList<>();
 
-        try {
-            // 1) 用你寫好的 GoogleConnector 直接打 CSE 拿結果
-            List<GoogleConnector.Result> results = GoogleConnector.search(query, 10);
-
-            // 2) 先用簡單規則把結果轉成 PageNode（之後可改成真的 HTML 解析）
-            for (GoogleConnector.Result r : results) {
-                // 先用 title 當作 token 來源，做非常粗的詞頻（之後可換 HTMLHandler 抽詞）
-                Map<Keyword, Integer> tf = new HashMap<>();
-                List<Keyword> dict = List.of(
-                        new Keyword("活動", 6),
-                        new Keyword("展覽", 5),
-                        new Keyword("音樂", 4),
-                        new Keyword("演唱會", 4),
-                        new Keyword("市集", 3)
-                );
-                String title = (r.title == null ? "" : r.title);
-                for (Keyword k : dict) {
-                    int c = 0;
-                    if (!title.isBlank() && title.contains(k.name())) c++;
-                    if (c > 0) tf.put(k, c);
-                }
-
-                // 先猜城市（之後可換 LocationRecognizer + HTMLHandler）
-                String city = guessCity(title);
-
-                pages.add(PageNode.of(
-                        r.link,
-                        title.isBlank() ? "未命名活動" : title,
-                        tf,
-                        null,                        // eventDate 之後從 HTML 抓
-                        city,                        // 先用猜的
-                        extractDomain(r.link),
-                        Arrays.asList(query.split("\\s+"))
-                ));
-            }
-        } catch (Exception e) {
-            System.err.println("[SearchEngine] GoogleConnector.search 失敗: " + e.getMessage());
+        List<String> qTokens = new ArrayList<>();
+        for (String t : query.split("\\s+")) {
+            if (!t.isBlank()) qTokens.add(t.trim());
         }
 
-        // 3) 排名
+        for (GoogleConnector.Result r : results) {
+            if (r == null || r.title == null || r.title.isBlank() || r.link == null || r.link.isBlank()) continue;
+            String linkKey = r.link.trim();
+            if (!seenLinks.add(linkKey)) continue; // 去重
+
+            // 簡易 tf：用 query 的詞當成 tf 來源（後面你可改為 HTML 解析）
+            Map<Keyword, Integer> tf = new HashMap<>();
+            for (String t : qTokens) {
+                Keyword k = new Keyword(t, 1); // 先給 baseline 權重 1
+                tf.put(k, tf.getOrDefault(k, 0) + 1);
+            }
+
+            PageNode p = PageNode.of(
+                    r.link,
+                    r.title,
+                    tf,
+                    null,                    // eventDate 暫空
+                    "",                      // city 暫時未知（之後可加 LocationRecognizer）
+                    extractDomain(r.link),   // domain
+                    qTokens                  // tokens 用 query（或可加上 title 斷詞）
+            );
+            pages.add(p);
+        }
+
+        // 3) 排名（會附帶 domain/city bonus）
         RankCalculator.rank(pages, user);
         return pages;
     }
 
     private static String extractDomain(String url) {
         try {
-            String u = url.toLowerCase();
+            String u = url.toLowerCase(Locale.ROOT);
             int p = u.indexOf("://");
             if (p >= 0) u = u.substring(p + 3);
             int s = u.indexOf('/');
@@ -62,17 +57,5 @@ public class SearchEngine {
         } catch (Exception e) {
             return "example.com";
         }
-    }
-
-    // 很粗的城市猜測（之後可換 LocationRecognizer）
-    private static String guessCity(String text) {
-        if (text == null) return "";
-        if (text.contains("台北")) return "台北";
-        if (text.contains("新北")) return "新北";
-        if (text.contains("桃園")) return "桃園";
-        if (text.contains("台中")) return "台中";
-        if (text.contains("台南")) return "台南";
-        if (text.contains("高雄")) return "高雄";
-        return "";
     }
 }
