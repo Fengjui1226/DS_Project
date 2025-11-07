@@ -7,7 +7,12 @@ public class Keyword {
     public Keyword(String name, double baseWeight){ this.name=name; this.baseWeight=baseWeight; }
     public String name(){ return name; }
     public double base(){ return baseWeight; }
-    @Override public boolean equals(Object o){ return o instanceof Keyword k && k.name.equals(name); }
+    @Override
+    public boolean equals(Object o){
+        if (!(o instanceof Keyword)) return false;
+        Keyword k = (Keyword) o;
+        return k.name.equals(name);
+    }
     @Override public int hashCode(){ return Objects.hash(name); }
     @Override public String toString(){ return name; }
 }
