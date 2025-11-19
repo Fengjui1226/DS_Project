@@ -94,6 +94,11 @@ public class SearchEngine {
             
             LocalDate eventDate = extractDateFromTitle(r.title);
 
+            // 過濾過期活動 - 只保留今天及未來的活動
+            if (eventDate != null && eventDate.isBefore(LocalDate.now())) {
+                continue; // 跳過過期活動
+            }
+
             PageNode p = PageNode.of(
                     r.link,
                     r.title,
