@@ -1,11 +1,12 @@
 package app.web;
 
+import app.bl.Keyword;
 import app.bl.PageNode;
 import app.bl.SearchEngine;
 import app.bl.SemanticAnalyzer;
 import app.bl.Tree;
 import app.bl.UserProfile;
-
+import java.util.LinkedHashMap;
 import com.sun.net.httpserver.HttpServer;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.Headers;
@@ -88,11 +89,35 @@ public class SimpleServer {
 
         StringBuilder sb = new StringBuilder();
         sb.append("<!doctype html><html><head><meta charset=\"utf-8\"><title>搜尋結果</title>");
-        sb.append("<style>body{font-family:sans-serif;background:#fffbe6;padding:24px}.container{max-width:900px;margin:0 auto}.card{background:white;padding:12px;margin:8px 0;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}.score{background:#FFEB3B;padding:4px 8px;border-radius:4px;font-weight:bold;float:right}.meta{color:#666;font-size:13px}.url{color:#0a6;font-size:12px;word-break:break-all}a{color:#1a0dab;text-decoration:none}a:hover{text-decoration:underline}.nav{margin:20px 0}.btn{background:#FFEB3B;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;text-decoration:none;color:#333}</style>");
+        sb.append("<style>");
+        sb.append("body{font-family:sans-serif;background:#fffbe6;padding:24px}");
+        sb.append(".container{max-width:1200px;margin:0 auto}");
+        sb.append(".main{display:flex;gap:20px}");
+        sb.append(".results{flex:2}");
+        sb.append(".sidebar{flex:1}");
+        sb.append(".card{background:white;padding:12px;margin:8px 0;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}");
+        sb.append(".score{background:#FFEB3B;padding:4px 8px;border-radius:4px;font-weight:bold;float:right}");
+        sb.append(".meta{color:#666;font-size:13px}");
+        sb.append(".url{color:#0a6;font-size:12px;word-break:break-all}");
+        sb.append("a{color:#1a0dab;text-decoration:none}");
+        sb.append("a:hover{text-decoration:underline}");
+        sb.append(".nav{margin:20px 0}");
+        sb.append(".btn{background:#FFEB3B;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;text-decoration:none;color:#333}");
+        sb.append(".panel{background:white;padding:16px;border-radius:8px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}");
+        sb.append(".panel h3{margin:0 0 12px 0;font-size:14px}");
+        sb.append(".panel ul{margin:0;padding-left:20px;font-size:13px}");
+        sb.append(".panel li{margin:4px 0}");
+        sb.append(".tree-item{font-family:monospace;font-size:12px;margin:4px 0}");
+        sb.append("@media(max-width:900px){.main{flex-direction:column}.sidebar{order:-1}}");
+        sb.append("</style>");
         sb.append("</head><body><div class=\"container\">");
         sb.append("<h2>搜尋結果：" + escapeHtml(query) + "</h2>");
-        sb.append("<div class=\"nav\"><a href=\"/\" class=\"btn\">← 返回</a> <a href=\"/tree\" class=\"btn\">📊 樹狀結構</a> <a href=\"/semantic\" class=\"btn\">🧠 語意分析</a></div>");
+        sb.append("<div class=\"nav\"><a href=\"/\" class=\"btn\">← 返回</a></div>");
 
+        sb.append("<div class=\"main\">");
+        
+        // 左側：搜尋結果
+        sb.append("<div class=\"results\">");
         if (results.isEmpty()) {
             sb.append("<p>沒有找到結果</p>");
         } else {
@@ -110,10 +135,74 @@ public class SimpleServer {
                 sb.append("</div>");
             }
         }
+        sb.append("</div>");
+        
+        // 右側：側邊欄（樹狀結構 + 語意分析）
+        sb.append("<div class=\"sidebar\">");
+        
+        Tree tree = SearchEngine.getLastSearchTree();
+        if (tree != null) {
+            // 樹狀結構面板
+            sb.append("<div class=\"panel\">");
+            sb.append("<h3>📊 網站結構 (Stage 2)</h3>");
+            List<PageNode> pages = tree.getAllPagesSorted();
+            Map<String, List<PageNode>> byDomain = new LinkedHashMap<>();
+            for (PageNode p : pages) {
+                byDomain.computeIfAbsent(p.getDomain(), k -> new ArrayList<>()).add(p);
+            }
+            for (Map.Entry<String, List<PageNode>> entry : byDomain.entrySet()) {
+                double total = entry.getValue().stream().mapToDouble(PageNode::getScore).sum();
+                sb.append("<div class=\"tree-item\"><strong>" + escapeHtml(entry.getKey()) + "</strong> (" + String.format("%.1f", total) + ")</div>");
+                // 顯示關鍵字
+                Map<String, Integer> kwCount = new HashMap<>();
+                for (PageNode p : entry.getValue()) {
+                    for (Map.Entry<Keyword, Integer> kw : p.tf().entrySet()) {
+                        kwCount.put(kw.getKey().name(), kwCount.getOrDefault(kw.getKey().name(), 0) + kw.getValue());
+                    }
+                }
+                if (!kwCount.isEmpty()) {
+                    sb.append("<div style=\"font-size:11px;color:#666;margin-left:12px\">");
+                    int count = 0;
+                    for (Map.Entry<String, Integer> kw : kwCount.entrySet()) {
+                        if (count++ > 0) sb.append(", ");
+                        sb.append(kw.getKey() + "(" + kw.getValue() + ")");
+                        if (count >= 3) break;
+                    }
+                    sb.append("</div>");
+                }
+            }
+            sb.append("</div>");
+            
+            // 語意分析面板
+            sb.append("<div class=\"panel\">");
+            sb.append("<h3>🧠 語意分析 (Stage 4)</h3>");
+            List<String> extracted = SemanticAnalyzer.extractRelatedKeywords(pages);
+            sb.append("<div style=\"font-size:12px;margin-bottom:8px\"><strong>提取的關鍵字:</strong></div>");
+            sb.append("<ul>");
+            for (String kw : extracted) {
+                sb.append("<li>" + escapeHtml(kw) + "</li>");
+            }
+            sb.append("</ul>");
+            
+            List<String> suggested = SemanticAnalyzer.suggestNewKeywords(extracted);
+            if (!suggested.isEmpty()) {
+                sb.append("<div style=\"font-size:12px;margin:8px 0\"><strong>建議關鍵字:</strong></div>");
+                sb.append("<ul>");
+                int count = 0;
+                for (String kw : suggested) {
+                    sb.append("<li>" + escapeHtml(kw) + "</li>");
+                    if (++count >= 5) break;
+                }
+                sb.append("</ul>");
+            }
+            sb.append("</div>");
+        }
+        
+        sb.append("</div>"); // sidebar
+        sb.append("</div>"); // main
         sb.append("</div></body></html>");
         sendHtml(ex, sb.toString());
     }
-
     private static void handleTree(HttpExchange ex) throws IOException {
         Tree tree = SearchEngine.getLastSearchTree();
         
