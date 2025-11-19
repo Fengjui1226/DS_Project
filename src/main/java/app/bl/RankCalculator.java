@@ -30,6 +30,17 @@ public class RankCalculator {
             double score = calculateScore(p, user, queryTokens);
             p.setScore(score);
         }
+        // 標準化分數到 0-100
+        if (!pages.isEmpty()) {
+            double maxScore = pages.stream().mapToDouble(PageNode::getScore).max().orElse(1.0);
+            if (maxScore > 0) {
+                for (PageNode p : pages) {
+                    p.setScore((p.getScore() / maxScore) * 100);
+                }
+            }
+        }
+
+        pages.sort((a, b) -> Double.compare(b.getScore(), a.getScore()));
 
         pages.sort((a, b) -> Double.compare(b.getScore(), a.getScore()));
     }
