@@ -1,17 +1,21 @@
 package app.bl;
 
 import app.da.GoogleConnector;
+import app.da.LocationRecognizer;
+import java.time.LocalDate;
 import java.util.*;
 
+/**
+ * SearchEngine - 搜尋演算法並計算結果
+ */
 public class SearchEngine {
 
-    // 活動相關關鍵字（用來擴充 query & 過濾結果）
     private static final List<String> EVENT_TERMS = List.of(
             "活動", "展覽", "音樂", "演唱會", "市集", "節慶",
-            "festival", "concert", "exhibition", "event"
+            "festival", "concert", "exhibition", "event",
+            "表演", "藝術", "體驗", "親子", "戶外"
     );
 
-    // 常見城市字詞（最簡單的偵測）
     private static final Map<String, String> CITY_ALIASES = Map.ofEntries(
             Map.entry("台北", "台北"),
             Map.entry("臺北", "台北"),
@@ -25,89 +29,106 @@ public class SearchEngine {
             Map.entry("高雄", "高雄"),
             Map.entry("kaohsiung", "高雄"),
             Map.entry("桃園", "桃園"),
-            Map.entry("taoyuan", "桃園"),
             Map.entry("基隆", "基隆"),
             Map.entry("新竹", "新竹"),
-            Map.entry("苗栗", "苗栗"),
-            Map.entry("彰化", "彰化"),
-            Map.entry("南投", "南投"),
-            Map.entry("雲林", "雲林"),
             Map.entry("嘉義", "嘉義"),
-            Map.entry("屏東", "屏東"),
             Map.entry("宜蘭", "宜蘭"),
             Map.entry("花蓮", "花蓮"),
-            Map.entry("台東", "台東"),
-            Map.entry("臺東", "台東")
+            Map.entry("台東", "台東")
     );
 
+    // 儲存最後一次搜尋的 Tree 結構
+    private static Tree lastSearchTree;
+
     public static List<PageNode> search(String query, UserProfile user) throws Exception {
-        // 1) 智能補詞：如果看起來是在找城市，加上活動/展覽/音樂等
         String refinedQuery = refineQuery(query);
 
-        // 2) 打 Google CSE 拿結果
         List<GoogleConnector.Result> raw = GoogleConnector.search(refinedQuery, 10);
-
-        // 3) 過濾：只保留標題（或網址）看起來像活動/展覽類
         List<GoogleConnector.Result> results = filterEventLike(raw);
 
-        // 4) 去重 & 轉 PageNode
         Set<String> seenLinks = new HashSet<>();
         List<PageNode> pages = new ArrayList<>();
 
-        // query tokens（保留使用者原本查的詞）
         List<String> qTokens = new ArrayList<>();
         for (String t : query.split("\\s+")) {
             if (!t.isBlank()) qTokens.add(t.trim());
         }
 
-        // 嘗試從 query 判斷城市（之後可以換 LocationRecognizer）
-        String city = detectCityFromQuery(query);
+        String city = LocationRecognizer.extractCity(query);
+        if (city == null) {
+            city = detectCityFromQuery(query);
+        }
 
         for (GoogleConnector.Result r : results) {
             if (r == null || r.title == null || r.title.isBlank() || r.link == null || r.link.isBlank()) continue;
             String linkKey = r.link.trim();
-            if (!seenLinks.add(linkKey)) continue; // 去重
+            if (!seenLinks.add(linkKey)) continue;
 
-            // 建 tf：先把使用者原本的 query 詞算進來
             Map<Keyword, Integer> tf = new HashMap<>();
+            
             for (String t : qTokens) {
-                Keyword k = new Keyword(t, 1); // baseline 權重 1
+                Keyword k = Keyword.of(t);
                 tf.put(k, tf.getOrDefault(k, 0) + 1);
             }
-            // 額外：若標題含「活動/展覽/音樂...」，就把那些詞也加進 tf
+            
+            String titleLower = r.title.toLowerCase(Locale.ROOT);
             for (String term : EVENT_TERMS) {
-                if (r.title.toLowerCase().contains(term.toLowerCase())) {
-                    Keyword k = new Keyword(term, 1);
+                if (titleLower.contains(term.toLowerCase())) {
+                    Keyword k = Keyword.of(term);
                     tf.put(k, tf.getOrDefault(k, 0) + 1);
                 }
             }
 
-            // tokens：query 的詞 + 活動關鍵字（碰到才加）
             List<String> tokens = new ArrayList<>(qTokens);
             for (String term : EVENT_TERMS) {
-                if (r.title.toLowerCase().contains(term.toLowerCase())) {
+                if (titleLower.contains(term.toLowerCase())) {
                     tokens.add(term);
                 }
             }
+            
+            String eventCity = city;
+            if (eventCity == null || eventCity.isEmpty()) {
+                eventCity = LocationRecognizer.extractCity(r.title);
+            }
+            if (eventCity == null) eventCity = "";
+            
+            LocalDate eventDate = extractDateFromTitle(r.title);
 
             PageNode p = PageNode.of(
                     r.link,
                     r.title,
                     tf,
-                    null,                   // eventDate 暫無（之後可加 HTML 解析）
-                    city,                   // 嘗試填入城市
-                    extractDomain(r.link),  // domain
-                    tokens                  // tokens
+                    eventDate,
+                    eventCity,
+                    extractDomain(r.link),
+                    tokens
             );
+            
+            for (String token : tokens) {
+                user.bumpHabit(token);
+            }
+            
             pages.add(p);
         }
 
-        // 5) 排名（你的 RankCalculator 會再加上 domain/city bonus）
+        // 使用 Tree 組織結果
+        Tree tree = new Tree();
+        tree.addPages(pages);
+        
         RankCalculator.rank(pages, user);
+        
+        // 儲存 Tree 供後續顯示
+        lastSearchTree = tree;
+        
         return pages;
     }
-
-    // ------- Helpers -------
+    
+    /**
+     * 取得最後一次搜尋的 Tree 結構
+     */
+    public static Tree getLastSearchTree() {
+        return lastSearchTree;
+    }
 
     private static String refineQuery(String query) {
         String q = query == null ? "" : query.trim();
@@ -118,7 +139,6 @@ public class SearchEngine {
                 .anyMatch(alias -> lower.contains(alias.toLowerCase(Locale.ROOT)));
 
         if (looksLikeCity) {
-            // 幫使用者自動補「活動/展覽/音樂/節慶/市集」
             q += " 活動 OR 展覽 OR 音樂 OR 節慶 OR 市集";
         }
         return q;
@@ -141,6 +161,8 @@ public class SearchEngine {
             }
             if (hit) out.add(r);
         }
+        
+        if (out.isEmpty()) return input;
         return out;
     }
 
@@ -165,5 +187,31 @@ public class SearchEngine {
         } catch (Exception e) {
             return "example.com";
         }
+    }
+    
+    private static LocalDate extractDateFromTitle(String title) {
+        if (title == null) return null;
+        
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("(\\d{1,2})[/\\-](\\d{1,2})");
+        java.util.regex.Matcher matcher = pattern.matcher(title);
+        
+        if (matcher.find()) {
+            try {
+                int month = Integer.parseInt(matcher.group(1));
+                int day = Integer.parseInt(matcher.group(2));
+                int year = LocalDate.now().getYear();
+                
+                if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+                    LocalDate date = LocalDate.of(year, month, day);
+                    if (date.isBefore(LocalDate.now())) {
+                        date = date.plusYears(1);
+                    }
+                    return date;
+                }
+            } catch (Exception e) {
+                // ignore
+            }
+        }
+        return null;
     }
 }
