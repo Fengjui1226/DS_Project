@@ -144,7 +144,7 @@ public class SimpleServer {
         if (tree != null) {
             // 樹狀結構面板
             sb.append("<div class=\"panel\">");
-            sb.append("<h3>📊 網站結構 (Stage 2)</h3>");
+            sb.append("<h3>網站結構 </h3>");
             List<PageNode> pages = tree.getAllPagesSorted();
             Map<String, List<PageNode>> byDomain = new LinkedHashMap<>();
             for (PageNode p : pages) {
@@ -175,7 +175,7 @@ public class SimpleServer {
             
             // 語意分析面板
             sb.append("<div class=\"panel\">");
-            sb.append("<h3>🧠 語意分析 (Stage 4)</h3>");
+            sb.append("<h3>語意分析 </h3>");
             List<String> extracted = SemanticAnalyzer.extractRelatedKeywords(pages);
             sb.append("<div style=\"font-size:12px;margin-bottom:8px\"><strong>提取的關鍵字:</strong></div>");
             sb.append("<ul>");
