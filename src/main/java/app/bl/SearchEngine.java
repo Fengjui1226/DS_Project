@@ -149,10 +149,14 @@ public class SearchEngine {
         return q;
     }
 
-    private static List<GoogleConnector.Result> filterEventLike(List<GoogleConnector.Result> input) {
+private static List<GoogleConnector.Result> filterEventLike(List<GoogleConnector.Result> input) {
         List<GoogleConnector.Result> out = new ArrayList<>();
         for (GoogleConnector.Result r : input) {
             if (r == null || r.title == null || r.link == null) continue;
+            
+            // 過濾掉 Google CSE 的假標題
+            if (r.title.contains("Google Custom Search")) continue;
+            
             String t = r.title.toLowerCase(Locale.ROOT);
             String link = r.link.toLowerCase(Locale.ROOT);
 
