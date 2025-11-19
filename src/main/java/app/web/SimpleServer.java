@@ -2,6 +2,7 @@ package app.web;
 
 import app.bl.PageNode;
 import app.bl.SearchEngine;
+import app.bl.SemanticAnalyzer;
 import app.bl.Tree;
 import app.bl.UserProfile;
 
@@ -23,6 +24,7 @@ public class SimpleServer {
         server.createContext("/", SimpleServer::handleIndex);
         server.createContext("/search", SimpleServer::handleSearch);
         server.createContext("/tree", SimpleServer::handleTree);
+        server.createContext("/semantic", SimpleServer::handleSemantic);
         server.createContext("/static/", SimpleServer::handleStatic);
         server.setExecutor(null);
         server.start();
@@ -89,7 +91,7 @@ public class SimpleServer {
         sb.append("<style>body{font-family:sans-serif;background:#fffbe6;padding:24px}.container{max-width:900px;margin:0 auto}.card{background:white;padding:12px;margin:8px 0;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}.score{background:#FFEB3B;padding:4px 8px;border-radius:4px;font-weight:bold;float:right}.meta{color:#666;font-size:13px}.url{color:#0a6;font-size:12px;word-break:break-all}a{color:#1a0dab;text-decoration:none}a:hover{text-decoration:underline}.nav{margin:20px 0}.btn{background:#FFEB3B;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;text-decoration:none;color:#333}</style>");
         sb.append("</head><body><div class=\"container\">");
         sb.append("<h2>搜尋結果：" + escapeHtml(query) + "</h2>");
-        sb.append("<div class=\"nav\"><a href=\"/\" class=\"btn\">← 返回</a> <a href=\"/tree\" class=\"btn\">📊 查看樹狀結構</a></div>");
+        sb.append("<div class=\"nav\"><a href=\"/\" class=\"btn\">← 返回</a> <a href=\"/tree\" class=\"btn\">📊 樹狀結構</a> <a href=\"/semantic\" class=\"btn\">🧠 語意分析</a></div>");
 
         if (results.isEmpty()) {
             sb.append("<p>沒有找到結果</p>");
@@ -126,6 +128,28 @@ public class SimpleServer {
             sb.append("<p>請先進行搜尋</p>");
         } else {
             sb.append("<pre>" + escapeHtml(tree.getTreeDisplay()) + "</pre>");
+        }
+        
+        sb.append("</div></body></html>");
+        sendHtml(ex, sb.toString());
+    }
+
+    private static void handleSemantic(HttpExchange ex) throws IOException {
+        Tree tree = SearchEngine.getLastSearchTree();
+        
+        StringBuilder sb = new StringBuilder();
+        sb.append("<!doctype html><html><head><meta charset=\"utf-8\"><title>語意分析</title>");
+        sb.append("<style>body{font-family:sans-serif;background:#fffbe6;padding:24px}.container{max-width:900px;margin:0 auto}pre{background:white;padding:16px;border-radius:8px;overflow-x:auto}.btn{background:#FFEB3B;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;text-decoration:none;color:#333}</style>");
+        sb.append("</head><body><div class=\"container\">");
+        sb.append("<h2>🧠 語意分析 (Stage 4)</h2>");
+        sb.append("<div style=\"margin:20px 0\"><a href=\"/\" class=\"btn\">← 返回搜尋</a></div>");
+        
+        if (tree == null) {
+            sb.append("<p>請先進行搜尋</p>");
+        } else {
+            List<PageNode> pages = tree.getAllPagesSorted();
+            String report = SemanticAnalyzer.getAnalysisReport(pages, "上次搜尋");
+            sb.append("<pre>" + escapeHtml(report) + "</pre>");
         }
         
         sb.append("</div></body></html>");
