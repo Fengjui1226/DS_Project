@@ -26,7 +26,6 @@ public class SimpleServer {
         server.createContext("/search", SimpleServer::handleSearch);
         server.createContext("/tree", SimpleServer::handleTree);
         server.createContext("/semantic", SimpleServer::handleSemantic);
-        server.createContext("/compare", SimpleServer::handleCompare);
         server.createContext("/static/", SimpleServer::handleStatic);
         server.setExecutor(null);
         server.start();
@@ -113,7 +112,7 @@ public class SimpleServer {
         sb.append("</style>");
         sb.append("</head><body><div class=\"container\">");
         sb.append("<h2>搜尋結果：" + escapeHtml(query) + "</h2>");
-        sb.append("<div class=\"nav\"><a href=\"/\" class=\"btn\">← 返回</a><a href=\"/compare\" class=\"btn\">🤖 LLM比較</a></div>");
+        sb.append("<div class=\"nav\"><a href=\"/\" class=\"btn\">← 返回</a></div>");
 
         sb.append("<div class=\"main\">");
         
@@ -241,98 +240,6 @@ public class SimpleServer {
             List<PageNode> pages = tree.getAllPagesSorted();
             String report = SemanticAnalyzer.getAnalysisReport(pages, "上次搜尋");
             sb.append("<pre>" + escapeHtml(report) + "</pre>");
-        }
-        
-        sb.append("</div></body></html>");
-        sendHtml(ex, sb.toString());
-    }
-
-    private static void handleCompare(HttpExchange ex) throws IOException {
-        Tree tree = SearchEngine.getLastSearchTree();
-        
-        StringBuilder sb = new StringBuilder();
-        sb.append("<!doctype html><html><head><meta charset=\"utf-8\"><title>LLM 比較</title>");
-        sb.append("<style>");
-        sb.append("body{font-family:sans-serif;background:#fffbe6;padding:24px}");
-        sb.append(".container{max-width:1000px;margin:0 auto}");
-        sb.append(".btn{background:#FFEB3B;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;text-decoration:none;color:#333}");
-        sb.append(".panel{background:white;padding:16px;border-radius:8px;margin:16px 0;box-shadow:0 2px 8px rgba(0,0,0,0.1)}");
-        sb.append("pre{background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;font-size:13px;white-space:pre-wrap}");
-        sb.append(".compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}");
-        sb.append("@media(max-width:800px){.compare-grid{grid-template-columns:1fr}}");
-        sb.append("</style>");
-        sb.append("</head><body><div class=\"container\">");
-        sb.append("<h2>🤖 LLM 比較 (Stage 6)</h2>");
-        sb.append("<div style=\"margin:20px 0\"><a href=\"/\" class=\"btn\">← 返回搜尋</a></div>");
-        
-        if (tree == null) {
-            sb.append("<p>請先進行搜尋，再來比較結果</p>");
-        } else {
-            List<PageNode> pages = tree.getAllPagesSorted();
-            
-            // 產生 Prompt
-            sb.append("<div class=\"panel\">");
-            sb.append("<h3>📝 搜尋技巧 Prompt</h3>");
-            sb.append("<p>複製以下 prompt 到 ChatGPT / Gemini / DeepSeek：</p>");
-            sb.append("<pre>");
-            sb.append("請幫我找台灣的娛樂活動，需求如下：\n\n");
-            sb.append("1. 只要今天之後的活動（過期的不要）\n");
-            sb.append("2. 優先顯示官方網站（.gov.tw, .org）\n");
-            sb.append("3. 依照以下關鍵字權重排序：\n");
-            sb.append("   - 活動(6分), 展覽(5分), 音樂(4分)\n");
-            sb.append("   - 市集(3分), 體驗(3分)\n");
-            sb.append("4. 優先顯示在我所在城市的活動\n");
-            sb.append("5. 提供活動名稱、日期、地點、網址\n\n");
-            sb.append("請搜尋：台北 音樂 活動");
-            sb.append("</pre>");
-            sb.append("</div>");
-            
-            // 比較表格
-            sb.append("<div class=\"compare-grid\">");
-            
-            // 我們的結果
-            sb.append("<div class=\"panel\">");
-            sb.append("<h3>🎯 我們的搜尋引擎結果</h3>");
-            sb.append("<ol style=\"font-size:13px\">");
-            int count = 0;
-            for (PageNode p : pages) {
-                if (++count > 5) break;
-                sb.append("<li><strong>" + escapeHtml(p.getTitle()) + "</strong><br>");
-                sb.append("<span style=\"color:#666\">分數: " + String.format("%.1f", p.getScore()));
-                if (p.getCity() != null && !p.getCity().isEmpty()) {
-                    sb.append(" | " + escapeHtml(p.getCity()));
-                }
-                sb.append("</span></li>");
-            }
-            sb.append("</ol>");
-            sb.append("</div>");
-            
-            // LLM 結果
-            sb.append("<div class=\"panel\">");
-            sb.append("<h3>🤖 LLM 結果（手動比較）</h3>");
-            sb.append("<p style=\"font-size:13px;color:#666\">將 LLM 的回答貼在報告中，比較：</p>");
-            sb.append("<ul style=\"font-size:13px\">");
-            sb.append("<li>結果相關性</li>");
-            sb.append("<li>是否過濾過期活動</li>");
-            sb.append("<li>是否優先官方網站</li>");
-            sb.append("<li>排序邏輯是否清楚</li>");
-            sb.append("</ul>");
-            sb.append("</div>");
-            
-            sb.append("</div>");
-            
-            // 優勢說明
-            sb.append("<div class=\"panel\">");
-            sb.append("<h3>💡 我們的優勢</h3>");
-            sb.append("<ul style=\"font-size:13px\">");
-            sb.append("<li><strong>透明的排名公式</strong> - 使用者可以理解為什麼結果這樣排序</li>");
-            sb.append("<li><strong>自動過濾過期活動</strong> - 只顯示今天及未來的活動</li>");
-            sb.append("<li><strong>網站可信度加成</strong> - 官方網站 (.gov.tw) 優先</li>");
-            sb.append("<li><strong>地區相關性</strong> - 根據使用者城市調整排名</li>");
-            sb.append("<li><strong>個人化推薦</strong> - 記錄使用者偏好，調整關鍵字權重</li>");
-            sb.append("<li><strong>語意擴展</strong> - 自動建議相關關鍵字</li>");
-            sb.append("</ul>");
-            sb.append("</div>");
         }
         
         sb.append("</div></body></html>");
