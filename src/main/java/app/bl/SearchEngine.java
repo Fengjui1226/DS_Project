@@ -4,6 +4,12 @@ import app.da.GoogleConnector;
 import app.da.LocationRecognizer;
 import java.time.LocalDate;
 import java.util.*;
+import java.time.OffsetDateTime;
+import java.time.Duration;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.net.URI;
 import java.util.regex.*;
 
 /**
@@ -77,8 +83,8 @@ public class SearchEngine {
         if (city == null || city.isEmpty()) {
             city = detectCityFromQuery(query);  // 若查詢中未提及城市，嘗試提取城市
         }
-
-        LocalDate today = LocalDate.now();
+        // 使用時間 API 取得當前日期以避免本機時鐘誤差，失敗時 fallback 到本機時間
+        LocalDate today = fetchCurrentDate();
 
         for (GoogleConnector.Result r : results) {
             if (r == null || r.title == null || r.title.isBlank() || r.link == null || r.link.isBlank()) continue;
@@ -104,9 +110,9 @@ public class SearchEngine {
             // 解析日期
             LocalDate eventDate = extractDateFromTitle(r.title);
 
-            // 過濾過期活動 - 簡單直接的判斷
-            if (eventDate != null && eventDate.isBefore(today)) {
-                continue; // 日期在今天之前，跳過
+            // 過濾過期活動與未知日期的活動：若沒日期或日期在今天之前則跳過
+            if (eventDate == null || eventDate.isBefore(today)) {
+                continue;
             }
 
             Map<Keyword, Integer> tf = new HashMap<>();
@@ -294,5 +300,45 @@ public class SearchEngine {
         
         // 回傳最晚的日期（結束日期）
         return foundDates.stream().max(LocalDate::compareTo).orElse(null);
+    }
+    /**
+     * 試圖從公共時間 API 取得目前的日期（UTC 或區域時間），若失敗則回傳本機系統日期。
+     */
+    private static LocalDate fetchCurrentDate() {
+        // worldtimeapi.org 提供簡單的 JSON 回應，其中包含 datetime 欄位
+        String api = "http://worldtimeapi.org/api/ip";
+        try {
+            HttpClient client = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(3))
+                    .build();
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(api))
+                    .timeout(Duration.ofSeconds(3))
+                    .GET()
+                    .build();
+            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() == 200) {
+                String body = resp.body();
+                // 找出 "datetime" 字段的值（例如 "2025-11-20T13:45:00.123+08:00"）
+                int idx = body.indexOf("\"datetime\"");
+                if (idx >= 0) {
+                    int colon = body.indexOf(':', idx);
+                    int q1 = body.indexOf('"', colon);
+                    int q2 = body.indexOf('"', q1 + 1);
+                    if (q1 >= 0 && q2 > q1) {
+                        String dt = body.substring(q1 + 1, q2);
+                        try {
+                            OffsetDateTime odt = OffsetDateTime.parse(dt);
+                            return odt.toLocalDate();
+                        } catch (Exception ex) {
+                            // ignore parse error and fallback
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // ignore network/timeout errors and fallback to system date
+        }
+        return LocalDate.now();
     }
 }
