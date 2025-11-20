@@ -76,17 +76,19 @@ public class SearchEngine {
             city = detectCityFromQuery(query);
         }
 
+        LocalDate today = LocalDate.now();
+
         for (GoogleConnector.Result r : results) {
             if (r == null || r.title == null || r.title.isBlank() || r.link == null || r.link.isBlank()) continue;
             
             String linkKey = r.link.trim().toLowerCase();
             String titleKey = r.title.trim().toLowerCase();
             
-            // 去重：相同連結或相同標題都跳過
+            // 去重
             if (!seenLinks.add(linkKey)) continue;
             if (!seenTitles.add(titleKey)) continue;
             
-            // 標題相似度檢查（前20字相同就視為重複）
+            // 標題相似度檢查
             String titlePrefix = titleKey.length() > 20 ? titleKey.substring(0, 20) : titleKey;
             boolean isDuplicate = false;
             for (String seen : seenTitles) {
@@ -96,6 +98,14 @@ public class SearchEngine {
                 }
             }
             if (isDuplicate) continue;
+
+            // 解析日期
+            LocalDate eventDate = extractDateFromTitle(r.title);
+
+            // 過濾過期活動 - 簡單直接的判斷
+            if (eventDate != null && eventDate.isBefore(today)) {
+                continue; // 日期在今天之前，跳過
+            }
 
             Map<Keyword, Integer> tf = new HashMap<>();
             
@@ -124,14 +134,6 @@ public class SearchEngine {
                 eventCity = LocationRecognizer.extractCity(r.title);
             }
             if (eventCity == null) eventCity = "";
-            
-            // 改善日期解析
-            LocalDate eventDate = extractDateFromTitle(r.title);
-
-            // 過濾過期活動
-            if (eventDate != null && eventDate.isBefore(LocalDate.now())) {
-                continue;
-            }
 
             PageNode p = PageNode.of(
                     r.link,
@@ -229,60 +231,61 @@ public class SearchEngine {
     private static LocalDate extractDateFromTitle(String title) {
         if (title == null) return null;
         
-        // 多種日期格式 - 優先找結束日期
-        List<Pattern> patterns = List.of(
-            // 2025.09.27 — 11.01 (找結束日期 11.01)
-            Pattern.compile("—\\s*(\\d{1,2})[./](\\d{1,2})"),
-            // ~ 11/01 或 至 11/01
-            Pattern.compile("[~至]\\s*(\\d{1,2})[./\\-](\\d{1,2})"),
-            // 2025/11/01 或 2025.11.01 或 2025-11-01
-            Pattern.compile("(202[4-6])[./\\-](\\d{1,2})[./\\-](\\d{1,2})"),
-            // 11.01 或 11/01 或 11-01
-            Pattern.compile("(?<!\\d)(\\d{1,2})[./\\-](\\d{1,2})(?!\\d)"),
-            // 11月1日
-            Pattern.compile("(\\d{1,2})月(\\d{1,2})日")
-        );
+        LocalDate today = LocalDate.now();
+        List<LocalDate> foundDates = new ArrayList<>();
         
-        LocalDate latestDate = null;
-        
-        for (Pattern pattern : patterns) {
-            Matcher matcher = pattern.matcher(title);
-            while (matcher.find()) {
-                try {
-                    int year = LocalDate.now().getYear();
-                    int month, day;
-                    
-                    if (matcher.groupCount() >= 3 && matcher.group(1).length() == 4) {
-                        year = Integer.parseInt(matcher.group(1));
-                        month = Integer.parseInt(matcher.group(2));
-                        day = Integer.parseInt(matcher.group(3));
-                    } else {
-                        month = Integer.parseInt(matcher.group(1));
-                        day = Integer.parseInt(matcher.group(2));
-                    }
-                    
-                    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-                        LocalDate date = LocalDate.of(year, month, day);
-                        
-                        // 如果日期已過且在今年，可能是明年的活動
-                        if (date.isBefore(LocalDate.now()) && year == LocalDate.now().getYear()) {
-                            // 檢查是否標題包含特定年份
-                            if (!title.contains("2024") && !title.contains("2025") && !title.contains("2026")) {
-                                date = date.plusYears(1);
-                            }
-                        }
-                        
-                        // 保留最晚的日期（結束日期）
-                        if (latestDate == null || date.isAfter(latestDate)) {
-                            latestDate = date;
-                        }
-                    }
-                } catch (Exception e) {
-                    // 繼續
+        // Pattern 1: 2024/10/26 或 2024.10.26 或 2024-10-26
+        Pattern p1 = Pattern.compile("(202\\d)[./\\-](\\d{1,2})[./\\-](\\d{1,2})");
+        Matcher m1 = p1.matcher(title);
+        while (m1.find()) {
+            try {
+                int year = Integer.parseInt(m1.group(1));
+                int month = Integer.parseInt(m1.group(2));
+                int day = Integer.parseInt(m1.group(3));
+                if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+                    foundDates.add(LocalDate.of(year, month, day));
                 }
-            }
+            } catch (Exception e) {}
         }
         
-        return latestDate;
+        // Pattern 2: 10/26 或 10.26 或 10-26 (沒有年份，假設今年或明年)
+        Pattern p2 = Pattern.compile("(?<!\\d)(\\d{1,2})[./\\-](\\d{1,2})(?!\\d)");
+        Matcher m2 = p2.matcher(title);
+        while (m2.find()) {
+            try {
+                int month = Integer.parseInt(m2.group(1));
+                int day = Integer.parseInt(m2.group(2));
+                if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+                    LocalDate date = LocalDate.of(today.getYear(), month, day);
+                    // 如果日期已過，假設是明年
+                    if (date.isBefore(today)) {
+                        date = date.plusYears(1);
+                    }
+                    foundDates.add(date);
+                }
+            } catch (Exception e) {}
+        }
+        
+        // Pattern 3: 10月26日
+        Pattern p3 = Pattern.compile("(\\d{1,2})月(\\d{1,2})日");
+        Matcher m3 = p3.matcher(title);
+        while (m3.find()) {
+            try {
+                int month = Integer.parseInt(m3.group(1));
+                int day = Integer.parseInt(m3.group(2));
+                if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+                    LocalDate date = LocalDate.of(today.getYear(), month, day);
+                    if (date.isBefore(today)) {
+                        date = date.plusYears(1);
+                    }
+                    foundDates.add(date);
+                }
+            } catch (Exception e) {}
+        }
+        
+        if (foundDates.isEmpty()) return null;
+        
+        // 回傳最晚的日期（結束日期）
+        return foundDates.stream().max(LocalDate::compareTo).orElse(null);
     }
 }
