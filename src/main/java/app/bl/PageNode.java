@@ -108,24 +108,44 @@ public class PageNode {
         return Math.min(bonus, 5.0);
     }
     
-    /**
+   /**
      * Region boost based on user location
      */
     public double calculateRegionBoost(String userCity) {
-        if (city == null || city.isEmpty() || userCity == null) return 1.0;
+        if (userCity == null || userCity.isEmpty()) return 1.0;
         
+        // 沒有城市資訊的活動降低分數
+        if (city == null || city.isEmpty()) return 0.5;
+        
+        // 同城市 2 倍
         if (city.equals(userCity)) return 2.0;
         
-        Map<String, List<String>> nearby = Map.of(
-            "台北", List.of("新北", "基隆", "桃園"),
-            "新北", List.of("台北", "基隆", "桃園"),
-            "台中", List.of("彰化", "南投", "苗栗"),
-            "高雄", List.of("台南", "屏東")
+        // 擴展鄰近城市關係
+        Map<String, List<String>> nearby = Map.ofEntries(
+            Map.entry("台北", List.of("新北", "基隆", "桃園", "宜蘭")),
+            Map.entry("新北", List.of("台北", "基隆", "桃園", "宜蘭")),
+            Map.entry("桃園", List.of("台北", "新北", "新竹", "苗栗")),
+            Map.entry("新竹", List.of("桃園", "苗栗", "台北")),
+            Map.entry("苗栗", List.of("新竹", "台中", "桃園")),
+            Map.entry("台中", List.of("彰化", "南投", "苗栗", "雲林")),
+            Map.entry("彰化", List.of("台中", "南投", "雲林")),
+            Map.entry("南投", List.of("台中", "彰化", "雲林", "嘉義")),
+            Map.entry("雲林", List.of("彰化", "嘉義", "台中")),
+            Map.entry("嘉義", List.of("雲林", "台南", "南投")),
+            Map.entry("台南", List.of("嘉義", "高雄")),
+            Map.entry("高雄", List.of("台南", "屏東")),
+            Map.entry("屏東", List.of("高雄", "台東")),
+            Map.entry("宜蘭", List.of("台北", "新北", "花蓮")),
+            Map.entry("花蓮", List.of("宜蘭", "台東")),
+            Map.entry("台東", List.of("花蓮", "屏東")),
+            Map.entry("基隆", List.of("台北", "新北"))
         );
         
+        // 鄰近城市 1.5 倍
         if (nearby.getOrDefault(userCity, List.of()).contains(city)) return 1.5;
         
-        return 1.0;
+        // 非本地活動 0.8 倍
+        return 0.8;
     }
 
     @Override 

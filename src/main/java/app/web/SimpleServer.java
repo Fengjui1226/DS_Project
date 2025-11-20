@@ -60,15 +60,20 @@ public class SimpleServer {
             "    input:focus{outline:none;border-color:rgba(255,107,107,0.5);box-shadow:0 0 20px rgba(255,107,107,0.1)}\n" +
             "    select{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);padding:16px;border-radius:12px;font-size:14px;color:#fff;cursor:pointer;min-width:100px}\n" +
             "    select option{background:#1a1a1a;color:#fff}\n" +
-            "    button{width:100%;background:linear-gradient(135deg,#ff6b6b 0%,#ee5a5a 100%);border:none;padding:16px;border-radius:12px;font-size:16px;font-weight:600;color:#fff;cursor:pointer;transition:all 0.3s ease;box-shadow:0 4px 20px rgba(255,107,107,0.3)}\n" +
+            "    .btn-row{display:flex;gap:12px}\n" +
+            "    button{flex:1;background:linear-gradient(135deg,#ff6b6b 0%,#ee5a5a 100%);border:none;padding:16px;border-radius:12px;font-size:16px;font-weight:600;color:#fff;cursor:pointer;transition:all 0.3s ease;box-shadow:0 4px 20px rgba(255,107,107,0.3)}\n" +
             "    button:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(255,107,107,0.4)}\n" +
+            "    .btn-locate{flex:0 0 auto;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);padding:16px 20px;border-radius:12px;font-size:16px;color:#888;cursor:pointer;transition:all 0.3s ease}\n" +
+            "    .btn-locate:hover{background:rgba(78,205,196,0.15);border-color:rgba(78,205,196,0.3);color:#4ecdc4}\n" +
+            "    .btn-locate.active{background:rgba(78,205,196,0.2);border-color:rgba(78,205,196,0.5);color:#4ecdc4}\n" +
             "    .features{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:48px}\n" +
             "    .feat{text-align:center;padding:20px}\n" +
             "    .feat-icon{font-size:28px;margin-bottom:12px}\n" +
             "    .feat-title{font-size:13px;font-weight:500;color:#fff;margin-bottom:4px}\n" +
             "    .feat-desc{font-size:11px;color:#555}\n" +
             "    .footer{text-align:center;margin-top:48px;color:#333;font-size:12px}\n" +
-            "    @media(max-width:600px){.input-row{flex-direction:column}select{width:100%}.features{grid-template-columns:1fr}h1{font-size:32px}}\n" +
+            "    .location-status{text-align:center;font-size:12px;color:#4ecdc4;margin-top:12px;min-height:18px}\n" +
+            "    @media(max-width:600px){.input-row{flex-direction:column}select{width:100%}.features{grid-template-columns:1fr}h1{font-size:32px}.btn-row{flex-direction:column}}\n" +
             "  </style>\n" +
             "</head>\n" +
             "<body>\n" +
@@ -90,16 +95,31 @@ public class SimpleServer {
             "      </div>\n" +
             "      <div class=\"input-row\">\n" +
             "        <input id=\"q\" name=\"query\" placeholder=\"搜尋音樂會、展覽、市集...\" autocomplete=\"off\" />\n" +
-            "        <select name=\"city\">\n" +
+            "        <select id=\"city\" name=\"city\">\n" +
             "          <option value=\"台北\">台北</option>\n" +
             "          <option value=\"新北\">新北</option>\n" +
             "          <option value=\"桃園\">桃園</option>\n" +
             "          <option value=\"台中\">台中</option>\n" +
             "          <option value=\"台南\">台南</option>\n" +
             "          <option value=\"高雄\">高雄</option>\n" +
+            "          <option value=\"基隆\">基隆</option>\n" +
+            "          <option value=\"新竹\">新竹</option>\n" +
+            "          <option value=\"苗栗\">苗栗</option>\n" +
+            "          <option value=\"彰化\">彰化</option>\n" +
+            "          <option value=\"南投\">南投</option>\n" +
+            "          <option value=\"雲林\">雲林</option>\n" +
+            "          <option value=\"嘉義\">嘉義</option>\n" +
+            "          <option value=\"屏東\">屏東</option>\n" +
+            "          <option value=\"宜蘭\">宜蘭</option>\n" +
+            "          <option value=\"花蓮\">花蓮</option>\n" +
+            "          <option value=\"台東\">台東</option>\n" +
             "        </select>\n" +
             "      </div>\n" +
-            "      <button type=\"submit\">探索活動</button>\n" +
+            "      <div class=\"btn-row\">\n" +
+            "        <button type=\"button\" class=\"btn-locate\" id=\"locateBtn\" onclick=\"getLocation()\">📍</button>\n" +
+            "        <button type=\"submit\">探索活動</button>\n" +
+            "      </div>\n" +
+            "      <div class=\"location-status\" id=\"locStatus\"></div>\n" +
             "    </form>\n" +
             "  </div>\n" +
             "  <div class=\"features\">\n" +
@@ -116,12 +136,52 @@ public class SimpleServer {
             "    <div class=\"feat\">\n" +
             "      <div class=\"feat-icon\">📍</div>\n" +
             "      <div class=\"feat-title\">在地優先</div>\n" +
-            "      <div class=\"feat-desc\">依你的城市排序</div>\n" +
+            "      <div class=\"feat-desc\">依你的位置排序</div>\n" +
             "    </div>\n" +
             "  </div>\n" +
             "  <div class=\"footer\">Built with ❤️ for Taiwan</div>\n" +
             "</div>\n" +
-            "<script>function setQuery(t){document.getElementById('q').value=t}</script>\n" +
+            "<script>\n" +
+            "function setQuery(t){document.getElementById('q').value=t}\n" +
+            "function getLocation(){\n" +
+            "  var btn=document.getElementById('locateBtn');\n" +
+            "  var status=document.getElementById('locStatus');\n" +
+            "  if(!navigator.geolocation){status.textContent='瀏覽器不支援定位';return;}\n" +
+            "  status.textContent='定位中...';\n" +
+            "  btn.classList.add('active');\n" +
+            "  navigator.geolocation.getCurrentPosition(function(pos){\n" +
+            "    var lat=pos.coords.latitude;\n" +
+            "    var lng=pos.coords.longitude;\n" +
+            "    var city=detectCity(lat,lng);\n" +
+            "    document.getElementById('city').value=city;\n" +
+            "    status.textContent='已定位：'+city;\n" +
+            "  },function(err){\n" +
+            "    status.textContent='定位失敗：'+err.message;\n" +
+            "    btn.classList.remove('active');\n" +
+            "  });\n" +
+            "}\n" +
+            "function detectCity(lat,lng){\n" +
+            "  // 台灣主要城市座標範圍\n" +
+            "  if(lat>25.0&&lng>121.4&&lng<121.7) return '台北';\n" +
+            "  if(lat>24.9&&lat<25.3&&lng>121.3&&lng<121.5) return '新北';\n" +
+            "  if(lat>24.9&&lat<25.1&&lng>121.2&&lng<121.4) return '桃園';\n" +
+            "  if(lat>24.0&&lat<24.3&&lng>120.5&&lng<120.8) return '台中';\n" +
+            "  if(lat>22.9&&lat<23.1&&lng>120.1&&lng<120.3) return '台南';\n" +
+            "  if(lat>22.5&&lat<22.8&&lng>120.2&&lng<120.4) return '高雄';\n" +
+            "  if(lat>25.1&&lng>121.7) return '基隆';\n" +
+            "  if(lat>24.7&&lat<24.9&&lng>120.9&&lng<121.1) return '新竹';\n" +
+            "  if(lat>24.3&&lat<24.7&&lng>120.7&&lng<121.0) return '苗栗';\n" +
+            "  if(lat>23.8&&lat<24.2&&lng>120.4&&lng<120.7) return '彰化';\n" +
+            "  if(lat>23.8&&lat<24.1&&lng>120.6&&lng<121.0) return '南投';\n" +
+            "  if(lat>23.5&&lat<23.9&&lng>120.1&&lng<120.6) return '雲林';\n" +
+            "  if(lat>23.4&&lat<23.6&&lng>120.3&&lng<120.5) return '嘉義';\n" +
+            "  if(lat>22.0&&lat<22.8&&lng>120.4&&lng<120.9) return '屏東';\n" +
+            "  if(lat>24.4&&lat<24.8&&lng>121.5&&lng<121.9) return '宜蘭';\n" +
+            "  if(lat>23.5&&lat<24.3&&lng>121.3&&lng<121.7) return '花蓮';\n" +
+            "  if(lat>22.3&&lat<23.5&&lng>120.8&&lng<121.5) return '台東';\n" +
+            "  return '台北';\n" +
+            "}\n" +
+            "</script>\n" +
             "</body></html>";
         sendHtml(ex, html);
     }
