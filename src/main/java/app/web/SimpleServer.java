@@ -39,44 +39,57 @@ public class SimpleServer {
             "  <meta charset=\"utf-8\">\n" +
             "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n" +
             "  <title>EventFinder 台灣活動搜尋</title>\n" +
+            "  <link href=\"https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap\" rel=\"stylesheet\">\n" +
             "  <style>\n" +
-            "    *{box-sizing:border-box}\n" +
-            "    body{font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);margin:0;padding:0;min-height:100vh;display:flex;align-items:center;justify-content:center}\n" +
-            "    .container{max-width:600px;width:90%;text-align:center}\n" +
-            "    .logo{font-size:48px;margin-bottom:8px}\n" +
-            "    h1{color:white;font-size:32px;margin:0 0 8px 0;text-shadow:2px 2px 4px rgba(0,0,0,0.2)}\n" +
-            "    .subtitle{color:rgba(255,255,255,0.9);font-size:16px;margin-bottom:32px}\n" +
-            "    .search-box{background:white;padding:24px;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}\n" +
-            "    .input-group{display:flex;gap:8px;margin-bottom:16px}\n" +
-            "    input{flex:1;padding:14px 16px;border:2px solid #e0e0e0;border-radius:8px;font-size:16px;transition:border-color 0.3s}\n" +
-            "    input:focus{outline:none;border-color:#667eea}\n" +
-            "    select{padding:14px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;background:white;cursor:pointer}\n" +
-            "    button{width:100%;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;border:none;padding:14px 24px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;transition:transform 0.2s,box-shadow 0.2s}\n" +
-            "    button:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(102,126,234,0.4)}\n" +
-            "    .features{display:flex;justify-content:center;gap:24px;margin-top:32px;flex-wrap:wrap}\n" +
-            "    .feature{color:rgba(255,255,255,0.9);font-size:13px}\n" +
-            "    .feature span{display:block;font-size:20px;margin-bottom:4px}\n" +
-            "    .categories{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-bottom:16px}\n" +
-            "    .category{background:#f0f0f0;padding:6px 12px;border-radius:16px;font-size:12px;color:#666;cursor:pointer;transition:all 0.2s}\n" +
-            "    .category:hover{background:#667eea;color:white}\n" +
+            "    *{box-sizing:border-box;margin:0;padding:0}\n" +
+            "    body{font-family:'Noto Sans TC',sans-serif;background:#0f0f0f;color:#fff;min-height:100vh;overflow-x:hidden}\n" +
+            "    .bg{position:fixed;top:0;left:0;width:100%;height:100%;z-index:-1}\n" +
+            "    .bg::before{content:'';position:absolute;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(circle at 30% 70%,rgba(255,107,107,0.08) 0%,transparent 50%),radial-gradient(circle at 70% 30%,rgba(78,205,196,0.08) 0%,transparent 50%)}\n" +
+            "    .container{max-width:700px;width:90%;margin:0 auto;padding:60px 0;min-height:100vh;display:flex;flex-direction:column;justify-content:center}\n" +
+            "    .brand{text-align:center;margin-bottom:48px}\n" +
+            "    .logo{font-size:64px;margin-bottom:16px;filter:drop-shadow(0 0 30px rgba(255,107,107,0.3))}\n" +
+            "    h1{font-size:42px;font-weight:700;background:linear-gradient(135deg,#fff 0%,#a0a0a0 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:-1px}\n" +
+            "    .tagline{color:#666;font-size:15px;margin-top:8px;letter-spacing:2px}\n" +
+            "    .search-card{background:rgba(255,255,255,0.03);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.06);border-radius:24px;padding:32px;box-shadow:0 20px 60px rgba(0,0,0,0.3)}\n" +
+            "    .categories{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-bottom:24px}\n" +
+            "    .cat{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);padding:8px 16px;border-radius:20px;font-size:13px;color:#888;cursor:pointer;transition:all 0.3s ease}\n" +
+            "    .cat:hover{background:rgba(255,107,107,0.15);border-color:rgba(255,107,107,0.3);color:#ff6b6b;transform:translateY(-2px)}\n" +
+            "    .input-row{display:flex;gap:12px;margin-bottom:20px}\n" +
+            "    input{flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);padding:16px 20px;border-radius:12px;font-size:16px;color:#fff;transition:all 0.3s ease}\n" +
+            "    input::placeholder{color:#555}\n" +
+            "    input:focus{outline:none;border-color:rgba(255,107,107,0.5);box-shadow:0 0 20px rgba(255,107,107,0.1)}\n" +
+            "    select{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);padding:16px;border-radius:12px;font-size:14px;color:#fff;cursor:pointer;min-width:100px}\n" +
+            "    select option{background:#1a1a1a;color:#fff}\n" +
+            "    button{width:100%;background:linear-gradient(135deg,#ff6b6b 0%,#ee5a5a 100%);border:none;padding:16px;border-radius:12px;font-size:16px;font-weight:600;color:#fff;cursor:pointer;transition:all 0.3s ease;box-shadow:0 4px 20px rgba(255,107,107,0.3)}\n" +
+            "    button:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(255,107,107,0.4)}\n" +
+            "    .features{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:48px}\n" +
+            "    .feat{text-align:center;padding:20px}\n" +
+            "    .feat-icon{font-size:28px;margin-bottom:12px}\n" +
+            "    .feat-title{font-size:13px;font-weight:500;color:#fff;margin-bottom:4px}\n" +
+            "    .feat-desc{font-size:11px;color:#555}\n" +
+            "    .footer{text-align:center;margin-top:48px;color:#333;font-size:12px}\n" +
+            "    @media(max-width:600px){.input-row{flex-direction:column}select{width:100%}.features{grid-template-columns:1fr}h1{font-size:32px}}\n" +
             "  </style>\n" +
             "</head>\n" +
             "<body>\n" +
+            "<div class=\"bg\"></div>\n" +
             "<div class=\"container\">\n" +
-            "  <div class=\"logo\">🎯</div>\n" +
-            "  <h1>EventFinder</h1>\n" +
-            "  <p class=\"subtitle\">探索全台精彩活動</p>\n" +
-            "  <div class=\"search-box\">\n" +
+            "  <div class=\"brand\">\n" +
+            "    <div class=\"logo\">🎪</div>\n" +
+            "    <h1>EventFinder</h1>\n" +
+            "    <p class=\"tagline\">DISCOVER EVENTS IN TAIWAN</p>\n" +
+            "  </div>\n" +
+            "  <div class=\"search-card\">\n" +
             "    <form action=\"/search\" method=\"get\">\n" +
             "      <div class=\"categories\">\n" +
-            "        <span class=\"category\" onclick=\"setQuery('音樂 演唱會')\">🎵 音樂</span>\n" +
-            "        <span class=\"category\" onclick=\"setQuery('展覽 藝術')\">🎨 展覽</span>\n" +
-            "        <span class=\"category\" onclick=\"setQuery('市集 文創')\">🛍️ 市集</span>\n" +
-            "        <span class=\"category\" onclick=\"setQuery('戶外 運動')\">🏃 戶外</span>\n" +
-            "        <span class=\"category\" onclick=\"setQuery('親子 兒童')\">👨‍👩‍👧 親子</span>\n" +
+            "        <span class=\"cat\" onclick=\"setQuery('音樂 演唱會')\">🎵 音樂</span>\n" +
+            "        <span class=\"cat\" onclick=\"setQuery('展覽 藝術')\">🎨 展覽</span>\n" +
+            "        <span class=\"cat\" onclick=\"setQuery('市集 文創')\">🛍️ 市集</span>\n" +
+            "        <span class=\"cat\" onclick=\"setQuery('戶外 露營')\">⛺ 戶外</span>\n" +
+            "        <span class=\"cat\" onclick=\"setQuery('親子 兒童')\">👶 親子</span>\n" +
             "      </div>\n" +
-            "      <div class=\"input-group\">\n" +
-            "        <input id=\"queryInput\" name=\"query\" placeholder=\"搜尋活動、展覽、音樂會...\" />\n" +
+            "      <div class=\"input-row\">\n" +
+            "        <input id=\"q\" name=\"query\" placeholder=\"搜尋音樂會、展覽、市集...\" autocomplete=\"off\" />\n" +
             "        <select name=\"city\">\n" +
             "          <option value=\"台北\">台北</option>\n" +
             "          <option value=\"新北\">新北</option>\n" +
@@ -86,23 +99,33 @@ public class SimpleServer {
             "          <option value=\"高雄\">高雄</option>\n" +
             "        </select>\n" +
             "      </div>\n" +
-            "      <button type=\"submit\">🔍 搜尋活動</button>\n" +
+            "      <button type=\"submit\">探索活動</button>\n" +
             "    </form>\n" +
             "  </div>\n" +
             "  <div class=\"features\">\n" +
-            "    <div class=\"feature\"><span>📅</span>只顯示未來活動</div>\n" +
-            "    <div class=\"feature\"><span>🏛️</span>官方來源優先</div>\n" +
-            "    <div class=\"feature\"><span>📍</span>依地區排序</div>\n" +
+            "    <div class=\"feat\">\n" +
+            "      <div class=\"feat-icon\">⚡</div>\n" +
+            "      <div class=\"feat-title\">即時更新</div>\n" +
+            "      <div class=\"feat-desc\">自動過濾過期活動</div>\n" +
+            "    </div>\n" +
+            "    <div class=\"feat\">\n" +
+            "      <div class=\"feat-icon\">🎯</div>\n" +
+            "      <div class=\"feat-title\">精準排序</div>\n" +
+            "      <div class=\"feat-desc\">AI 智慧權重計算</div>\n" +
+            "    </div>\n" +
+            "    <div class=\"feat\">\n" +
+            "      <div class=\"feat-icon\">📍</div>\n" +
+            "      <div class=\"feat-title\">在地優先</div>\n" +
+            "      <div class=\"feat-desc\">依你的城市排序</div>\n" +
+            "    </div>\n" +
             "  </div>\n" +
+            "  <div class=\"footer\">Built with ❤️ for Taiwan</div>\n" +
             "</div>\n" +
-            "<script>\n" +
-            "function setQuery(text) {\n" +
-            "  document.getElementById('queryInput').value = text;\n" +
-            "}\n" +
-            "</script>\n" +
+            "<script>function setQuery(t){document.getElementById('q').value=t}</script>\n" +
             "</body></html>";
         sendHtml(ex, html);
     }
+    
     private static void handleSearch(HttpExchange ex) throws IOException {
         String query = getQueryParam(ex.getRequestURI(), "query");
         String city = getQueryParam(ex.getRequestURI(), "city");
