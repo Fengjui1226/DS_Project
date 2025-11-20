@@ -53,12 +53,13 @@ public class SearchEngine {
                 }
             }
             if (!hasCity) {
-                query = userCity + " " + query;
+                query = userCity + " " + query;  // 如果查詢沒有包含城市，預設加入城市名稱
             }
         }
         
         String refinedQuery = refineQuery(query);
 
+        // 搜尋 Google 並過濾非活動相關的結果
         List<GoogleConnector.Result> raw = GoogleConnector.search(refinedQuery, 10);
         List<GoogleConnector.Result> results = filterEventLike(raw);
 
@@ -71,9 +72,10 @@ public class SearchEngine {
             if (!t.isBlank()) qTokens.add(t.trim());
         }
 
+        // 偵測並處理城市
         String city = LocationRecognizer.extractCity(query);
-        if (city == null) {
-            city = detectCityFromQuery(query);
+        if (city == null || city.isEmpty()) {
+            city = detectCityFromQuery(query);  // 若查詢中未提及城市，嘗試提取城市
         }
 
         LocalDate today = LocalDate.now();
@@ -88,7 +90,7 @@ public class SearchEngine {
             if (!seenLinks.add(linkKey)) continue;
             if (!seenTitles.add(titleKey)) continue;
             
-            // 標題相似度檢查
+            // 標題相似度檢查，避免重複的標題
             String titlePrefix = titleKey.length() > 20 ? titleKey.substring(0, 20) : titleKey;
             boolean isDuplicate = false;
             for (String seen : seenTitles) {
@@ -109,11 +111,13 @@ public class SearchEngine {
 
             Map<Keyword, Integer> tf = new HashMap<>();
             
+            // 解析查詢中的關鍵字頻率
             for (String t : qTokens) {
                 Keyword k = Keyword.of(t);
                 tf.put(k, tf.getOrDefault(k, 0) + 1);
             }
             
+            // 處理活動關鍵字
             String titleLower = r.title.toLowerCase(Locale.ROOT);
             for (String term : EVENT_TERMS) {
                 if (titleLower.contains(term.toLowerCase())) {
@@ -122,6 +126,7 @@ public class SearchEngine {
                 }
             }
 
+            // 添加查詢關鍵字到 tokens 中
             List<String> tokens = new ArrayList<>(qTokens);
             for (String term : EVENT_TERMS) {
                 if (titleLower.contains(term.toLowerCase())) {
@@ -145,6 +150,7 @@ public class SearchEngine {
                     tokens
             );
             
+            // 更新使用者的習慣行為
             for (String token : tokens) {
                 user.bumpHabit(token);
             }
@@ -152,6 +158,7 @@ public class SearchEngine {
             pages.add(p);
         }
 
+        // 樹結構和分數排名
         Tree tree = new Tree();
         tree.addPages(pages);
         

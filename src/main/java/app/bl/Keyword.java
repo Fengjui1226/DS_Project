@@ -5,7 +5,7 @@ public class Keyword {
     private final String name;
     private final double baseWeight;
     
-    // Predefined keyword weights as per proposal (Search Tricks #1)
+    // 預定的關鍵字權重
     private static final Map<String, Double> PREDEFINED_WEIGHTS = Map.ofEntries(
         Map.entry("活動", 6.0),
         Map.entry("展覽", 5.0),
@@ -27,24 +27,30 @@ public class Keyword {
         Map.entry("表演", 4.0)
     );
     
+    // 構造方法
     public Keyword(String name, double baseWeight) { 
         this.name = name; 
         this.baseWeight = baseWeight; 
     }
     
-    // Factory method using predefined weights
+    // 使用預定的權重建立 Keyword
     public static Keyword of(String name) {
         double weight = PREDEFINED_WEIGHTS.getOrDefault(name.toLowerCase(), 1.0);
         return new Keyword(name, weight);
     }
     
+    // 取得預設權重
     public static double getPredefinedWeight(String name) {
         return PREDEFINED_WEIGHTS.getOrDefault(name.toLowerCase(), 1.0);
     }
     
+    // 取得關鍵字名稱
     public String name() { return name; }
-    public double base() { return baseWeight; }
     
+    // 取得關鍵字權重
+    public double base() { return baseWeight; }
+
+    // 自定義 equals 方法，忽略大小寫
     @Override
     public boolean equals(Object o) {
         if (!(o instanceof Keyword)) return false;
@@ -52,9 +58,15 @@ public class Keyword {
         return k.name.equalsIgnoreCase(name);
     }
     
+    // 自定義 hashCode，忽略大小寫
     @Override 
-    public int hashCode() { return Objects.hash(name.toLowerCase()); }
+    public int hashCode() { 
+        return Objects.hash(name.toLowerCase()); 
+    }
     
+    // 重寫 toString 以便顯示關鍵字名稱和權重
     @Override 
-    public String toString() { return name + "(" + baseWeight + ")"; }
+    public String toString() { 
+        return name + "(" + baseWeight + ")"; 
+    }
 }

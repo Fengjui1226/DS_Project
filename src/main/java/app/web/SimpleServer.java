@@ -6,6 +6,7 @@ import app.bl.SearchEngine;
 import app.bl.SemanticAnalyzer;
 import app.bl.Tree;
 import app.bl.UserProfile;
+import java.util.LinkedHashMap;
 
 import com.sun.net.httpserver.HttpServer;
 import com.sun.net.httpserver.HttpExchange;
@@ -32,7 +33,7 @@ public class SimpleServer {
         System.out.println("SimpleServer started at http://localhost:" + port);
     }
 
-   private static void handleIndex(HttpExchange ex) throws IOException {
+    private static void handleIndex(HttpExchange ex) throws IOException {
         String html = "<!doctype html>\n" +
             "<html lang=\"zh-TW\">\n" +
             "<head>\n" +
@@ -161,7 +162,6 @@ public class SimpleServer {
             "  });\n" +
             "}\n" +
             "function detectCity(lat,lng){\n" +
-            "  // 台灣主要城市座標範圍\n" +
             "  if(lat>25.0&&lng>121.4&&lng<121.7) return '台北';\n" +
             "  if(lat>24.9&&lat<25.3&&lng>121.3&&lng<121.5) return '新北';\n" +
             "  if(lat>24.9&&lat<25.1&&lng>121.2&&lng<121.4) return '桃園';\n" +
@@ -185,12 +185,12 @@ public class SimpleServer {
             "</body></html>";
         sendHtml(ex, html);
     }
-    
+
     private static void handleSearch(HttpExchange ex) throws IOException {
         String query = getQueryParam(ex.getRequestURI(), "query");
         String city = getQueryParam(ex.getRequestURI(), "city");
         if (city == null) city = "台北";
-        if (query == null || query.trim().isEmpty()) query = "台北 音樂 活動";
+        if (query == null || query.trim().isEmpty()) query = "音樂 活動";
 
         UserProfile user = new UserProfile();
         user.setUserCity(city);
@@ -208,41 +208,45 @@ public class SimpleServer {
         StringBuilder sb = new StringBuilder();
         sb.append("<!doctype html><html><head><meta charset=\"utf-8\"><title>搜尋結果</title>");
         sb.append("<style>");
-        sb.append("body{font-family:sans-serif;background:#fffbe6;padding:24px}");
+        sb.append("body{font-family:'Noto Sans TC',sans-serif;background:#0f0f0f;color:#fff;padding:24px;min-height:100vh}");
         sb.append(".container{max-width:1200px;margin:0 auto}");
         sb.append(".main{display:flex;gap:20px}");
         sb.append(".results{flex:2}");
         sb.append(".sidebar{flex:1}");
-        sb.append(".card{background:white;padding:12px;margin:8px 0;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}");
-        sb.append(".score{background:#FFEB3B;padding:4px 8px;border-radius:4px;font-weight:bold;float:right}");
-        sb.append(".meta{color:#666;font-size:13px}");
-        sb.append(".url{color:#0a6;font-size:12px;word-break:break-all}");
-        sb.append("a{color:#1a0dab;text-decoration:none}");
-        sb.append("a:hover{text-decoration:underline}");
+        sb.append(".card{background:rgba(255,255,255,0.05);padding:16px;margin:12px 0;border-radius:12px;border:1px solid rgba(255,255,255,0.1)}");
+        sb.append(".score{background:#ff6b6b;padding:4px 10px;border-radius:6px;font-weight:bold;float:right;font-size:14px}");
+        sb.append(".meta{color:#888;font-size:13px;margin-top:8px}");
+        sb.append(".url{color:#4ecdc4;font-size:12px;word-break:break-all;margin-top:4px}");
+        sb.append("a{color:#fff;text-decoration:none}");
+        sb.append("a:hover{color:#ff6b6b}");
         sb.append(".nav{margin:20px 0}");
-        sb.append(".btn{background:#FFEB3B;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;text-decoration:none;color:#333;margin-right:8px}");
-        sb.append(".panel{background:white;padding:16px;border-radius:8px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}");
-        sb.append(".panel h3{margin:0 0 12px 0;font-size:14px}");
-        sb.append(".panel ul{margin:0;padding-left:20px;font-size:13px}");
+        sb.append(".btn{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);padding:10px 20px;border-radius:8px;cursor:pointer;text-decoration:none;color:#fff;margin-right:8px;transition:all 0.3s}");
+        sb.append(".btn:hover{background:rgba(255,107,107,0.2);border-color:rgba(255,107,107,0.3)}");
+        sb.append(".panel{background:rgba(255,255,255,0.03);padding:16px;border-radius:12px;margin-bottom:16px;border:1px solid rgba(255,255,255,0.06)}");
+        sb.append(".panel h3{margin:0 0 12px 0;font-size:14px;color:#ff6b6b}");
+        sb.append(".panel ul{margin:0;padding-left:20px;font-size:13px;color:#888}");
         sb.append(".panel li{margin:4px 0}");
-        sb.append(".tree-item{font-family:monospace;font-size:12px;margin:4px 0}");
+        sb.append(".tree-item{font-family:monospace;font-size:12px;margin:4px 0;color:#888}");
+        sb.append("h2{color:#fff;font-size:24px;margin-bottom:8px}");
+        sb.append(".query-info{color:#888;font-size:14px;margin-bottom:20px}");
         sb.append("@media(max-width:900px){.main{flex-direction:column}.sidebar{order:-1}}");
         sb.append("</style>");
         sb.append("</head><body><div class=\"container\">");
-        sb.append("<h2>搜尋結果：" + escapeHtml(query) + "</h2>");
-        sb.append("<div class=\"nav\"><a href=\"/\" class=\"btn\">← 返回</a></div>");
+        sb.append("<h2>搜尋結果</h2>");
+        sb.append("<div class=\"query-info\">關鍵字：" + escapeHtml(query) + " | 城市：" + escapeHtml(city) + "</div>");
+        sb.append("<div class=\"nav\"><a href=\"/\" class=\"btn\">← 返回首頁</a></div>");
 
         sb.append("<div class=\"main\">");
         
         // 左側：搜尋結果
         sb.append("<div class=\"results\">");
         if (results.isEmpty()) {
-            sb.append("<p>沒有找到結果</p>");
+            sb.append("<p style=\"color:#888\">沒有找到結果</p>");
         } else {
             int rank = 1;
             for (PageNode p : results) {
                 sb.append("<div class=\"card\">");
-                sb.append("<span class=\"score\">" + String.format("%.2f", p.getScore()) + "</span>");
+                sb.append("<span class=\"score\">" + String.format("%.1f", p.getScore()) + "</span>");
                 sb.append("<div><strong>#" + rank++ + "</strong> <a href=\"" + escapeHtml(p.getUrl()) + "\" target=\"_blank\">" + escapeHtml(p.getTitle()) + "</a></div>");
                 sb.append("<div class=\"meta\">");
                 if (p.getCity() != null && !p.getCity().isEmpty()) sb.append("📍 " + escapeHtml(p.getCity()) + " ");
@@ -255,12 +259,11 @@ public class SimpleServer {
         }
         sb.append("</div>");
         
-        // 右側：側邊欄（樹狀結構 + 語意分析）
+        // 右側：側邊欄
         sb.append("<div class=\"sidebar\">");
         
         Tree tree = SearchEngine.getLastSearchTree();
         if (tree != null) {
-            // 樹狀結構面板
             sb.append("<div class=\"panel\">");
             sb.append("<h3>📊 網站結構</h3>");
             List<PageNode> pages = tree.getAllPagesSorted();
@@ -270,32 +273,14 @@ public class SimpleServer {
             }
             for (Map.Entry<String, List<PageNode>> entry : byDomain.entrySet()) {
                 double total = entry.getValue().stream().mapToDouble(PageNode::getScore).sum();
-                sb.append("<div class=\"tree-item\"><strong>" + escapeHtml(entry.getKey()) + "</strong> (" + String.format("%.1f", total) + ")</div>");
-                // 顯示關鍵字
-                Map<String, Integer> kwCount = new HashMap<>();
-                for (PageNode p : entry.getValue()) {
-                    for (Map.Entry<Keyword, Integer> kw : p.tf().entrySet()) {
-                        kwCount.put(kw.getKey().name(), kwCount.getOrDefault(kw.getKey().name(), 0) + kw.getValue());
-                    }
-                }
-                if (!kwCount.isEmpty()) {
-                    sb.append("<div style=\"font-size:11px;color:#666;margin-left:12px\">");
-                    int count = 0;
-                    for (Map.Entry<String, Integer> kw : kwCount.entrySet()) {
-                        if (count++ > 0) sb.append(", ");
-                        sb.append(kw.getKey() + "(" + kw.getValue() + ")");
-                        if (count >= 3) break;
-                    }
-                    sb.append("</div>");
-                }
+                sb.append("<div class=\"tree-item\"><strong style=\"color:#fff\">" + escapeHtml(entry.getKey()) + "</strong> (" + String.format("%.1f", total) + ")</div>");
             }
             sb.append("</div>");
             
-            // 語意分析面板
             sb.append("<div class=\"panel\">");
             sb.append("<h3>🧠 語意分析</h3>");
             List<String> extracted = SemanticAnalyzer.extractRelatedKeywords(pages);
-            sb.append("<div style=\"font-size:12px;margin-bottom:8px\"><strong>提取的關鍵字:</strong></div>");
+            sb.append("<div style=\"font-size:12px;margin-bottom:8px;color:#888\">提取的關鍵字:</div>");
             sb.append("<ul>");
             for (String kw : extracted) {
                 sb.append("<li>" + escapeHtml(kw) + "</li>");
@@ -304,7 +289,7 @@ public class SimpleServer {
             
             List<String> suggested = SemanticAnalyzer.suggestNewKeywords(extracted);
             if (!suggested.isEmpty()) {
-                sb.append("<div style=\"font-size:12px;margin:8px 0\"><strong>建議關鍵字:</strong></div>");
+                sb.append("<div style=\"font-size:12px;margin:8px 0;color:#888\">建議關鍵字:</div>");
                 sb.append("<ul>");
                 int count = 0;
                 for (String kw : suggested) {
@@ -316,8 +301,8 @@ public class SimpleServer {
             sb.append("</div>");
         }
         
-        sb.append("</div>"); // sidebar
-        sb.append("</div>"); // main
+        sb.append("</div>");
+        sb.append("</div>");
         sb.append("</div></body></html>");
         sendHtml(ex, sb.toString());
     }
@@ -327,9 +312,9 @@ public class SimpleServer {
         
         StringBuilder sb = new StringBuilder();
         sb.append("<!doctype html><html><head><meta charset=\"utf-8\"><title>樹狀結構</title>");
-        sb.append("<style>body{font-family:monospace;background:#fffbe6;padding:24px}.container{max-width:900px;margin:0 auto}pre{background:white;padding:16px;border-radius:8px;overflow-x:auto}.btn{background:#FFEB3B;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;text-decoration:none;color:#333}</style>");
+        sb.append("<style>body{font-family:monospace;background:#0f0f0f;color:#fff;padding:24px}.container{max-width:900px;margin:0 auto}pre{background:rgba(255,255,255,0.05);padding:16px;border-radius:8px;overflow-x:auto}.btn{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);padding:8px 16px;border-radius:4px;cursor:pointer;text-decoration:none;color:#fff}</style>");
         sb.append("</head><body><div class=\"container\">");
-        sb.append("<h2>📊 網站樹狀結構 (Stage 2)</h2>");
+        sb.append("<h2>📊 網站樹狀結構</h2>");
         sb.append("<div style=\"margin:20px 0\"><a href=\"/\" class=\"btn\">← 返回搜尋</a></div>");
         
         if (tree == null) {
@@ -347,9 +332,9 @@ public class SimpleServer {
         
         StringBuilder sb = new StringBuilder();
         sb.append("<!doctype html><html><head><meta charset=\"utf-8\"><title>語意分析</title>");
-        sb.append("<style>body{font-family:sans-serif;background:#fffbe6;padding:24px}.container{max-width:900px;margin:0 auto}pre{background:white;padding:16px;border-radius:8px;overflow-x:auto}.btn{background:#FFEB3B;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;text-decoration:none;color:#333}</style>");
+        sb.append("<style>body{font-family:sans-serif;background:#0f0f0f;color:#fff;padding:24px}.container{max-width:900px;margin:0 auto}pre{background:rgba(255,255,255,0.05);padding:16px;border-radius:8px;overflow-x:auto}.btn{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);padding:8px 16px;border-radius:4px;cursor:pointer;text-decoration:none;color:#fff}</style>");
         sb.append("</head><body><div class=\"container\">");
-        sb.append("<h2>🧠 語意分析 (Stage 4)</h2>");
+        sb.append("<h2>🧠 語意分析</h2>");
         sb.append("<div style=\"margin:20px 0\"><a href=\"/\" class=\"btn\">← 返回搜尋</a></div>");
         
         if (tree == null) {
