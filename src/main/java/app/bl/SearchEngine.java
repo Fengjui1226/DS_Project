@@ -41,13 +41,29 @@ public class SearchEngine {
     private static Tree lastSearchTree;
 
     public static List<PageNode> search(String query, UserProfile user) throws Exception {
+        // 確保城市被加入查詢
+        String userCity = user.getUserCity();
+        if (userCity != null && !userCity.isEmpty()) {
+            String queryLower = query.toLowerCase();
+            boolean hasCity = false;
+            for (String cityAlias : CITY_ALIASES.keySet()) {
+                if (queryLower.contains(cityAlias.toLowerCase())) {
+                    hasCity = true;
+                    break;
+                }
+            }
+            if (!hasCity) {
+                query = userCity + " " + query;
+            }
+        }
+        
         String refinedQuery = refineQuery(query);
 
         List<GoogleConnector.Result> raw = GoogleConnector.search(refinedQuery, 10);
         List<GoogleConnector.Result> results = filterEventLike(raw);
 
         Set<String> seenLinks = new HashSet<>();
-        Set<String> seenTitles = new HashSet<>(); // 新增：標題去重
+        Set<String> seenTitles = new HashSet<>();
         List<PageNode> pages = new ArrayList<>();
 
         List<String> qTokens = new ArrayList<>();
@@ -213,19 +229,25 @@ public class SearchEngine {
     private static LocalDate extractDateFromTitle(String title) {
         if (title == null) return null;
         
-        // 多種日期格式
+        // 多種日期格式 - 優先找結束日期
         List<Pattern> patterns = List.of(
-            // 2025.09.27 或 2025/09/27 或 2025-09-27
+            // 2025.09.27 — 11.01 (找結束日期 11.01)
+            Pattern.compile("—\\s*(\\d{1,2})[./](\\d{1,2})"),
+            // ~ 11/01 或 至 11/01
+            Pattern.compile("[~至]\\s*(\\d{1,2})[./\\-](\\d{1,2})"),
+            // 2025/11/01 或 2025.11.01 或 2025-11-01
             Pattern.compile("(202[4-6])[./\\-](\\d{1,2})[./\\-](\\d{1,2})"),
-            // 09.27 或 09/27 或 09-27
+            // 11.01 或 11/01 或 11-01
             Pattern.compile("(?<!\\d)(\\d{1,2})[./\\-](\\d{1,2})(?!\\d)"),
-            // 9月27日
+            // 11月1日
             Pattern.compile("(\\d{1,2})月(\\d{1,2})日")
         );
         
+        LocalDate latestDate = null;
+        
         for (Pattern pattern : patterns) {
             Matcher matcher = pattern.matcher(title);
-            if (matcher.find()) {
+            while (matcher.find()) {
                 try {
                     int year = LocalDate.now().getYear();
                     int month, day;
@@ -241,17 +263,26 @@ public class SearchEngine {
                     
                     if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
                         LocalDate date = LocalDate.of(year, month, day);
+                        
                         // 如果日期已過且在今年，可能是明年的活動
                         if (date.isBefore(LocalDate.now()) && year == LocalDate.now().getYear()) {
-                            date = date.plusYears(1);
+                            // 檢查是否標題包含特定年份
+                            if (!title.contains("2024") && !title.contains("2025") && !title.contains("2026")) {
+                                date = date.plusYears(1);
+                            }
                         }
-                        return date;
+                        
+                        // 保留最晚的日期（結束日期）
+                        if (latestDate == null || date.isAfter(latestDate)) {
+                            latestDate = date;
+                        }
                     }
                 } catch (Exception e) {
-                    // 繼續下一個 pattern
+                    // 繼續
                 }
             }
         }
-        return null;
+        
+        return latestDate;
     }
 }
