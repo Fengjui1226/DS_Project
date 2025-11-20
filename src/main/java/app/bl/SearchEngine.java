@@ -4,6 +4,7 @@ import app.da.GoogleConnector;
 import app.da.LocationRecognizer;
 import java.time.LocalDate;
 import java.util.*;
+import java.util.regex.*;
 
 /**
  * SearchEngine - 搜尋演算法並計算結果
@@ -37,7 +38,6 @@ public class SearchEngine {
             Map.entry("台東", "台東")
     );
 
-    // 儲存最後一次搜尋的 Tree 結構
     private static Tree lastSearchTree;
 
     public static List<PageNode> search(String query, UserProfile user) throws Exception {
@@ -47,6 +47,7 @@ public class SearchEngine {
         List<GoogleConnector.Result> results = filterEventLike(raw);
 
         Set<String> seenLinks = new HashSet<>();
+        Set<String> seenTitles = new HashSet<>(); // 新增：標題去重
         List<PageNode> pages = new ArrayList<>();
 
         List<String> qTokens = new ArrayList<>();
@@ -61,8 +62,24 @@ public class SearchEngine {
 
         for (GoogleConnector.Result r : results) {
             if (r == null || r.title == null || r.title.isBlank() || r.link == null || r.link.isBlank()) continue;
-            String linkKey = r.link.trim();
+            
+            String linkKey = r.link.trim().toLowerCase();
+            String titleKey = r.title.trim().toLowerCase();
+            
+            // 去重：相同連結或相同標題都跳過
             if (!seenLinks.add(linkKey)) continue;
+            if (!seenTitles.add(titleKey)) continue;
+            
+            // 標題相似度檢查（前20字相同就視為重複）
+            String titlePrefix = titleKey.length() > 20 ? titleKey.substring(0, 20) : titleKey;
+            boolean isDuplicate = false;
+            for (String seen : seenTitles) {
+                if (seen.startsWith(titlePrefix) && !seen.equals(titleKey)) {
+                    isDuplicate = true;
+                    break;
+                }
+            }
+            if (isDuplicate) continue;
 
             Map<Keyword, Integer> tf = new HashMap<>();
             
@@ -92,11 +109,12 @@ public class SearchEngine {
             }
             if (eventCity == null) eventCity = "";
             
+            // 改善日期解析
             LocalDate eventDate = extractDateFromTitle(r.title);
 
-            // 過濾過期活動 - 只保留今天及未來的活動
+            // 過濾過期活動
             if (eventDate != null && eventDate.isBefore(LocalDate.now())) {
-                continue; // 跳過過期活動
+                continue;
             }
 
             PageNode p = PageNode.of(
@@ -116,21 +134,16 @@ public class SearchEngine {
             pages.add(p);
         }
 
-        // 使用 Tree 組織結果
         Tree tree = new Tree();
         tree.addPages(pages);
         
         RankCalculator.rank(pages, user);
         
-        // 儲存 Tree 供後續顯示
         lastSearchTree = tree;
         
         return pages;
     }
     
-    /**
-     * 取得最後一次搜尋的 Tree 結構
-     */
     public static Tree getLastSearchTree() {
         return lastSearchTree;
     }
@@ -149,12 +162,11 @@ public class SearchEngine {
         return q;
     }
 
-private static List<GoogleConnector.Result> filterEventLike(List<GoogleConnector.Result> input) {
+    private static List<GoogleConnector.Result> filterEventLike(List<GoogleConnector.Result> input) {
         List<GoogleConnector.Result> out = new ArrayList<>();
         for (GoogleConnector.Result r : input) {
             if (r == null || r.title == null || r.link == null) continue;
             
-            // 過濾掉 Google CSE 的假標題
             if (r.title.contains("Google Custom Search")) continue;
             
             String t = r.title.toLowerCase(Locale.ROOT);
@@ -201,24 +213,43 @@ private static List<GoogleConnector.Result> filterEventLike(List<GoogleConnector
     private static LocalDate extractDateFromTitle(String title) {
         if (title == null) return null;
         
-        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("(\\d{1,2})[/\\-](\\d{1,2})");
-        java.util.regex.Matcher matcher = pattern.matcher(title);
+        // 多種日期格式
+        List<Pattern> patterns = List.of(
+            // 2025.09.27 或 2025/09/27 或 2025-09-27
+            Pattern.compile("(202[4-6])[./\\-](\\d{1,2})[./\\-](\\d{1,2})"),
+            // 09.27 或 09/27 或 09-27
+            Pattern.compile("(?<!\\d)(\\d{1,2})[./\\-](\\d{1,2})(?!\\d)"),
+            // 9月27日
+            Pattern.compile("(\\d{1,2})月(\\d{1,2})日")
+        );
         
-        if (matcher.find()) {
-            try {
-                int month = Integer.parseInt(matcher.group(1));
-                int day = Integer.parseInt(matcher.group(2));
-                int year = LocalDate.now().getYear();
-                
-                if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-                    LocalDate date = LocalDate.of(year, month, day);
-                    if (date.isBefore(LocalDate.now())) {
-                        date = date.plusYears(1);
+        for (Pattern pattern : patterns) {
+            Matcher matcher = pattern.matcher(title);
+            if (matcher.find()) {
+                try {
+                    int year = LocalDate.now().getYear();
+                    int month, day;
+                    
+                    if (matcher.groupCount() >= 3 && matcher.group(1).length() == 4) {
+                        year = Integer.parseInt(matcher.group(1));
+                        month = Integer.parseInt(matcher.group(2));
+                        day = Integer.parseInt(matcher.group(3));
+                    } else {
+                        month = Integer.parseInt(matcher.group(1));
+                        day = Integer.parseInt(matcher.group(2));
                     }
-                    return date;
+                    
+                    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+                        LocalDate date = LocalDate.of(year, month, day);
+                        // 如果日期已過且在今年，可能是明年的活動
+                        if (date.isBefore(LocalDate.now()) && year == LocalDate.now().getYear()) {
+                            date = date.plusYears(1);
+                        }
+                        return date;
+                    }
+                } catch (Exception e) {
+                    // 繼續下一個 pattern
                 }
-            } catch (Exception e) {
-                // ignore
             }
         }
         return null;
