@@ -68,7 +68,7 @@ public class SearchEngine {
         // 搜尋 Google 並過濾非活動相關的結果
         List<GoogleConnector.Result> raw = GoogleConnector.search(refinedQuery, 10);
         List<GoogleConnector.Result> results = filterEventLike(raw);
-
+        
         Set<String> seenLinks = new HashSet<>();
         Set<String> seenTitles = new HashSet<>();
         List<PageNode> pages = new ArrayList<>();
@@ -110,9 +110,10 @@ public class SearchEngine {
             // 解析日期
             LocalDate eventDate = extractDateFromTitle(r.title);
 
-            // 過濾過期活動與未知日期的活動：若沒日期或日期在今天之前則跳過
-            if (eventDate == null || eventDate.isBefore(today)) {
-                continue;
+            // 只過濾掉「有日期且已過期」的活動
+            // 沒有日期的保留（可能是活動列表頁面或即將公告的活動）
+            if (eventDate != null && eventDate.isBefore(today)) {
+                continue;  // 已過期的活動過濾掉
             }
 
             Map<Keyword, Integer> tf = new HashMap<>();
