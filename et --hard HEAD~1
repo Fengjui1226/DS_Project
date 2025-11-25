@@ -1,0 +1,239 @@
+[33mcommit e81845583ddffe8cbf5a5dd36f572fdc62190bc8[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m
+Author: zhiyizheng7 <112207420@g.nccu.edu.tw>
+Date:   Thu Nov 20 15:55:57 2025 +0800
+
+    time change
+
+[33mcommit a9ac7f1ffc2b4ce4db8296f6f9164dc88768304e[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Thu Nov 20 12:24:04 2025 +0800
+
+    fix: Updated SearchEngine.java to fix city and event filtering
+
+[33mcommit 932db32c8483c7b0ef17f0025c0067899656adc0[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Thu Nov 20 11:41:50 2025 +0800
+
+    fix: simplify date filtering - only show events from today onwards
+
+[33mcommit e0204803a7dbe91e51009175c7c832da92231c85[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Thu Nov 20 11:34:40 2025 +0800
+
+    fix: ensure city is used in search query and improve date parsing
+
+[33mcommit e61ac93fd4f66b9e3419ffb5e2c296fafb5a6fad[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Thu Nov 20 11:20:54 2025 +0800
+
+    feat: add geolocation support and improve region boost logic
+
+[33mcommit 380f53dfda51a0d37e3b74d1e6f3a71ac13119c4[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Thu Nov 20 11:14:28 2025 +0800
+
+    fix: improve deduplication and date parsing to filter expired events
+
+[33mcommit 2ccb2a9ae8610855824ea59d31da5861a879915f[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Thu Nov 20 11:09:00 2025 +0800
+
+    feat: redesign homepage with modern dark theme UI
+
+[33mcommit 14b4a082ad94dd12c0ea12517bd79c49cf10669a[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Thu Nov 20 11:02:46 2025 +0800
+
+    feat: redesign homepage with modern UI, logo, and category shortcuts
+
+[33mcommit f70e09c1f349c6819c6cce38ab930d03e0c943d9[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Thu Nov 20 10:55:28 2025 +0800
+
+    refactor: remove /compare page, will do LLM comparison in report
+
+[33mcommit 681ec2fbfd0d4c8c5f9739156c146079ab65ca8c[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Wed Nov 19 23:43:13 2025 +0800
+
+    feat: add LLM comparison page for Stage 6
+
+[33mcommit 9efdd1987e7360f149727a3bf43395e7cd4bd652[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Wed Nov 19 23:38:36 2025 +0800
+
+    feat: integrate tree structure and semantic analysis into search results page
+
+[33mcommit 78f6f6f28e5a3ab9f0b4400496ffa5a47e054670[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Wed Nov 19 23:36:31 2025 +0800
+
+    feat: integrate tree structure and semantic analysis into search results page
+
+[33mcommit cc95d9fa86ece2249221fa4698d26531904bcc6b[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Wed Nov 19 23:24:37 2025 +0800
+
+    feat: add semantic analysis page for Stage 4
+
+[33mcommit 793e627fb07a30c35338d38e3571955c618c16a2[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Wed Nov 19 23:17:37 2025 +0800
+
+    fix: add missing link variable in filterEventLike method
+
+[33mcommit 59057c370cc534fa03adf944ea822942577c3b35[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Wed Nov 19 23:07:44 2025 +0800
+
+    feat: normalize scores to 0-100 scale for better readability
+
+[33mcommit 298de44c06c4411f1e0ed4e28dc0312f495f366c[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Wed Nov 19 23:03:36 2025 +0800
+
+    feat: add SemanticAnalyzer for Stage 4 keyword extraction and expansion
+
+[33mcommit 3e80c5b1b2a66dcd24769472c9841bf88d34a456[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Wed Nov 19 22:54:32 2025 +0800
+
+    feat: filter out past events to show only upcoming activities
+
+[33mcommit 410bfe61fbabb9ae44add38ea2d675aa6d8a0a6f[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Wed Nov 19 22:51:31 2025 +0800
+
+    feat: add tree display page for Stage 2 site ranking visualization
+
+[33mcommit f1b2960450d6fd820d6f166639a54f4ea87fa967[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Wed Nov 19 22:49:32 2025 +0800
+
+    feat: integrate Tree structure and location recognition in search
+
+[33mcommit 2bda73741618d1c697bf76d5294085888dbcd5a9[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Wed Nov 19 22:47:00 2025 +0800
+
+    feat: add HTML parsing for title, date, and city extraction
+
+[33mcommit d3e0aa9be14ba3920b967c4c106af48dd342a4a9[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Wed Nov 19 22:14:00 2025 +0800
+
+    feat: add Tree class for site ranking with keyword counts (Stage 2)
+
+[33mcommit 561d801a9bafc9252dccab41bf8d5f0454a4a1ab[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Wed Nov 19 22:11:25 2025 +0800
+
+    feat: implement complete ranking formula with all boost factors
+
+[33mcommit 5b6e3038dd6752d8433363159bfc198dd919554f[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Wed Nov 19 22:10:14 2025 +0800
+
+    feat: add freshness, proximity bonus, and region boost calculations
+
+[33mcommit 823a09c93d7ccfcfb0544be3eae001b83e594c1c[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Wed Nov 19 22:07:02 2025 +0800
+
+    feat: add habit tracking and preference boost calculation
+
+[33mcommit b858e8c99373f68720ad22bc30fdbaf9a05578b8[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Wed Nov 19 22:05:24 2025 +0800
+
+    feat: add predefined keyword weights for ranking
+
+[33mcommit 81f62f57acccd69e84ce6b4da409508fb0ea836f[m
+Author: zhiyizheng7 <112207420@g.nccu.edu.tw>
+Date:   Fri Nov 7 15:51:59 2025 +0800
+
+    change the keyword
+
+[33mcommit 21669223293484beab6865e19348999f020f9152[m
+Author: zhiyizheng7 <112207420@g.nccu.edu.tw>
+Date:   Fri Nov 7 09:59:08 2025 +0800
+
+    Annie
+
+[33mcommit 830972c52c3149e04ae6d4dd1234b4db14f8a902[m
+Author: zhiyizheng7 <112207420@g.nccu.edu.tw>
+Date:   Fri Nov 7 09:54:11 2025 +0800
+
+    Annie
+
+[33mcommit e599634590b20f1c8c03dcf2c21abc0882a81ced[m
+Author: zhiyizheng7 <112207420@g.nccu.edu.tw>
+Date:   Thu Nov 6 17:05:46 2025 +0800
+
+    write some message
+
+[33mcommit ef2f67783ee4861278d21116fc8e56f8785ec179[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Thu Nov 6 14:53:44 2025 +0800
+
+    初步評分
+
+[33mcommit a2aef512921c6b383b1bb09c483482a9f6f97c2f[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Thu Nov 6 14:25:23 2025 +0800
+
+    完成 GoogleConnector 串接 + 成功取得真實搜尋結果
+
+[33mcommit 77b5eab5789144da7ac9845d4b6fb872c04f811c[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Thu Nov 6 14:08:10 2025 +0800
+
+    wip
+
+[33mcommit c15d468b54919c6f5393f93af32c02592a00cada[m
+Author: zhiyizheng7 <112207420@g.nccu.edu.tw>
+Date:   Wed Nov 5 20:46:28 2025 +0800
+
+    let me try
+
+[33mcommit d1455183ab3457ecaace7b06cfe84f47ce930c02[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Wed Nov 5 19:56:37 2025 +0800
+
+    feat: update PageNode and Main for extended search engine design
+
+[33mcommit 9b9be984ebc225e94e0c6f3b3050318c4cf24660[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Wed Nov 5 16:01:11 2025 +0800
+
+    feat: implement UserProfile and ranking logic for personalized search engine
+
+[33mcommit 361f1acab07f8e935d8b8b3fdd3800b60715e13a[m
+Author: Fengjui-Liu <113306008@g.nccu.edu.tw>
+Date:   Wed Nov 5 14:09:24 2025 +0800
+
+    feat: initialize runnable Java project structure
+
+[33mcommit d86d9c32f562eedf0e9d0d87d2f71ac1005b68bc[m
+Author: zhiyizheng7 <112207420@g.nccu.edu.tw>
+Date:   Wed Sep 24 01:47:34 2025 +0800
+
+    try1
+
+[33mcommit 0c064f5e21443bb34f9b19fcbfbb39f43d76b6c3[m
+Author: zhiyizheng7 <112207420@g.nccu.edu.tw>
+Date:   Wed Sep 24 01:39:02 2025 +0800
+
+    trytry
+
+[33mcommit ee53b9b2548581e1c7a67b1a632a6248d8248026[m
+Author: zhiyizheng7 <112207420@g.nccu.edu.tw>
+Date:   Tue Sep 23 00:48:10 2025 +0800
+
+    change
+
+[33mcommit ec4b476e2046a51441b981948319ec9c2b1a7d22[m
+Author: Fengjui1226 <BCPS8562620LIU941226@gmail.com>
+Date:   Mon Sep 22 12:40:47 2025 +0800
+
+    Initial commit
