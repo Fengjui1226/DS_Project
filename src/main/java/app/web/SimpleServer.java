@@ -31,6 +31,16 @@ public class SimpleServer {
         server.setExecutor(null);
         server.start();
         System.out.println("SimpleServer started at http://localhost:" + port);
+        // Keep the main thread alive so the HttpServer threads keep running
+        final Object waitLock = new Object();
+        synchronized (waitLock) {
+            try {
+                waitLock.wait();
+            } catch (InterruptedException ie) {
+                // restore interrupt status and exit
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     private static void handleIndex(HttpExchange ex) throws IOException {
@@ -253,7 +263,7 @@ public class SimpleServer {
                 if (p.getEventDate() != null) sb.append("📅 " + p.getEventDate() + " ");
                 sb.append("🌐 " + escapeHtml(p.getDomain()));
                 sb.append("</div>");
-                sb.append("<div class=\"url\">" + escapeHtml(p.getUrl()) + "</div>");
+                sb.append("<div class=\"url\"><a href=\"" + escapeHtml(p.getUrl()) + "\" target=\"_blank\">🌐 官方網站（點我）</a></div>");
                 sb.append("</div>");
             }
         }

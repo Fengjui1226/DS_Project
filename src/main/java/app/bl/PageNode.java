@@ -150,6 +150,7 @@ public class PageNode {
 
     @Override 
     public String toString() {
-        return "PageNode{" + title + " | " + url + " | " + city + "}";
+        String displayUrl = "🌐 官方網站（點我）";
+        return title + " | " + displayUrl + " | " + (city == null ? "" : city);
     }
 }

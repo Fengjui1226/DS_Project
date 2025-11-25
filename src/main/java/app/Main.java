@@ -21,12 +21,14 @@ public class Main {
         // 列印
         int i = 1;
         for (PageNode p : results) {
+            String url = p.getUrl();
+            String displayText = (url.length() > 30) ? url.substring(0, 30) + "..." : url; // 顯示簡化的 URL
             System.out.printf("%2d. %.2f  [%s] %s%n    %s%n",
                     i++,
                     p.getScore(),
                     p.getCity() == null ? "" : p.getCity(),
                     p.getTitle(),
-                    p.getUrl());
+                    displayText);
         }
         if (results.isEmpty()) {
             System.out.println("(No results — check API key / CX / quota)");
