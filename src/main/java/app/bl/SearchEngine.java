@@ -1,24 +1,16 @@
 package app.bl;
 
-import java.net.URI;
+import app.da.GoogleConnector;
+import app.da.LocationRecognizer;
+import java.time.LocalDate;
+import java.util.*;
+import java.time.OffsetDateTime;
+import java.time.Duration;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.time.Duration;
-import java.time.LocalDate;
-import java.time.OffsetDateTime;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
-import app.da.GoogleConnector;
-import app.da.LocationRecognizer;
+import java.net.URI;
+import java.util.regex.*;
 
 /**
  * SearchEngine - 搜尋演算法（改進版 v2）
@@ -46,6 +38,12 @@ public class SearchEngine {
         "kktix", "accupass", "tixcraft", "opentix", 
         "ticket", "ibon", "udnfunlife", "ticketplus",
         "instagram", "facebook", "fb.com"
+    );
+    
+    // 首頁 URL 模式（應該降權或過濾）
+    private static final Set<String> HOMEPAGE_PATTERNS = Set.of(
+        "/index.html", "/index.php", "/index.aspx",
+        "/home", "/main", "/default.aspx"
     );
     
     // 應該排除的頁面類型
@@ -228,11 +226,13 @@ public class SearchEngine {
     }
 
     /**
-     * 🕐 改進版結果過濾 - 強化時間過濾
+     * 🕐 改進版結果過濾 - 強化時間過濾 + 過濾首頁連結
      */
     private static List<GoogleConnector.Result> filterResults(List<GoogleConnector.Result> input, LocalDate today) {
-        List<GoogleConnector.Result> priorityResults = new ArrayList<>();  // 售票/社群網站
-        List<GoogleConnector.Result> normalResults = new ArrayList<>();    // 一般結果
+        List<GoogleConnector.Result> specificPageResults = new ArrayList<>();  // 具體頁面（最優先）
+        List<GoogleConnector.Result> priorityResults = new ArrayList<>();      // 售票/社群網站
+        List<GoogleConnector.Result> normalResults = new ArrayList<>();        // 一般結果
+        List<GoogleConnector.Result> homepageResults = new ArrayList<>();      // 首頁（最低優先）
         
         for (GoogleConnector.Result r : input) {
             if (r == null || r.title == null || r.link == null) continue;
@@ -256,6 +256,14 @@ public class SearchEngine {
                 continue;
             }
             
+            // 🏠 檢查是否為首頁（應該降權）
+            boolean isHomepage = isHomepageUrl(r.link);
+            if (isHomepage) {
+                System.out.println("[降權] 首頁連結: " + r.link);
+                homepageResults.add(r);
+                continue;  // 放到最後
+            }
+            
             // 檢查是否為優先網站（售票/社群）
             boolean isPrioritySite = PRIORITY_DOMAINS.stream()
                 .anyMatch(domain -> link.contains(domain));
@@ -264,17 +272,24 @@ public class SearchEngine {
             boolean hasEventTerm = EVENT_TERMS.stream()
                 .anyMatch(term -> title.contains(term.toLowerCase()) || link.contains(term.toLowerCase()));
             
-            if (isPrioritySite) {
+            // 🎯 檢查 URL 是否為具體頁面（有明確路徑）
+            boolean isSpecificPage = isSpecificPageUrl(r.link);
+            
+            if (isSpecificPage && isPrioritySite) {
+                specificPageResults.add(r);  // 具體頁面 + 優先網站 = 最高優先
+            } else if (isPrioritySite) {
                 priorityResults.add(r);
             } else if (hasEventTerm) {
                 normalResults.add(r);
             }
         }
         
-        // 合併結果：優先網站在前
+        // 合併結果：具體頁面 > 優先網站 > 一般 > 首頁
         List<GoogleConnector.Result> combined = new ArrayList<>();
+        combined.addAll(specificPageResults);
         combined.addAll(priorityResults);
         combined.addAll(normalResults);
+        combined.addAll(homepageResults);  // 首頁放最後
         
         // 如果過濾後沒有結果，回傳排除明顯非活動頁面的原始結果
         if (combined.isEmpty()) {
@@ -291,6 +306,77 @@ public class SearchEngine {
         }
         
         return combined;
+    }
+    
+    /**
+     * 🏠 檢查是否為首頁 URL
+     */
+    private static boolean isHomepageUrl(String url) {
+        if (url == null) return false;
+        
+        try {
+            String u = url.toLowerCase(Locale.ROOT);
+            
+            // 移除 protocol
+            int p = u.indexOf("://");
+            if (p >= 0) u = u.substring(p + 3);
+            
+            // 移除 domain
+            int s = u.indexOf('/');
+            if (s < 0) return true;  // 沒有路徑 = 首頁
+            
+            String path = u.substring(s);
+            
+            // 只有 "/" = 首頁
+            if (path.equals("/")) return true;
+            
+            // 常見首頁模式
+            for (String pattern : HOMEPAGE_PATTERNS) {
+                if (path.equals(pattern) || path.startsWith(pattern + "?")) {
+                    return true;
+                }
+            }
+            
+            // 路徑太短（如 /tw, /zh）通常是首頁
+            if (path.length() <= 4 && !path.contains(".")) {
+                return true;
+            }
+            
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+    
+    /**
+     * 🎯 檢查是否為具體頁面 URL（有明確的文章/活動路徑）
+     */
+    private static boolean isSpecificPageUrl(String url) {
+        if (url == null) return false;
+        
+        String u = url.toLowerCase(Locale.ROOT);
+        
+        // 具體頁面通常有這些路徑特徵
+        String[] specificPatterns = {
+            "/event/", "/events/", "/activity/", "/activities/",
+            "/article/", "/post/", "/news/", "/detail/",
+            "/show/", "/concert/", "/exhibition/",
+            "/p/", "/id/", "/item/", "/view/",
+            ".html", ".htm", ".php", ".aspx"
+        };
+        
+        for (String pattern : specificPatterns) {
+            if (u.contains(pattern)) {
+                return true;
+            }
+        }
+        
+        // URL 路徑有數字 ID 通常是具體頁面
+        if (u.matches(".*/(\\d{4,}|[a-f0-9]{8,}).*")) {
+            return true;
+        }
+        
+        return false;
     }
 
     private static String detectCityFromQuery(String query) {

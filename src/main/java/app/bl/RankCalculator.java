@@ -49,6 +49,7 @@ public class RankCalculator {
     private static final double APPLICATION_PENALTY = 0.15;     // 申請/辦法頁面
     private static final double REGULATION_PENALTY = 0.2;       // 法規/須知頁面
     private static final double LIST_PAGE_PENALTY = 0.7;        // 列表頁面
+    private static final double HOMEPAGE_PENALTY = 0.4;         // 首頁（降權）
     
     // ============ 網站分類 ============
     
@@ -342,7 +343,57 @@ public class RankCalculator {
             return 0.2;
         }
         
+        // 🏠 首頁檢測 - 降權
+        if (isHomepageUrl(url)) {
+            return HOMEPAGE_PENALTY;
+        }
+        
         return 1.0;
+    }
+    
+    /**
+     * 🏠 檢查是否為首頁 URL
+     */
+    private static boolean isHomepageUrl(String url) {
+        if (url == null) return false;
+        
+        try {
+            String u = url.toLowerCase(Locale.ROOT);
+            
+            // 移除 protocol
+            int p = u.indexOf("://");
+            if (p >= 0) u = u.substring(p + 3);
+            
+            // 移除 domain
+            int s = u.indexOf('/');
+            if (s < 0) return true;  // 沒有路徑 = 首頁
+            
+            String path = u.substring(s);
+            
+            // 只有 "/" = 首頁
+            if (path.equals("/")) return true;
+            
+            // 常見首頁模式
+            Set<String> homepagePatterns = Set.of(
+                "/index.html", "/index.php", "/index.aspx",
+                "/home", "/main", "/default.aspx"
+            );
+            
+            for (String pattern : homepagePatterns) {
+                if (path.equals(pattern) || path.startsWith(pattern + "?")) {
+                    return true;
+                }
+            }
+            
+            // 路徑太短（如 /tw, /zh）通常是首頁
+            if (path.length() <= 4 && !path.contains(".")) {
+                return true;
+            }
+            
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
     }
     
     private static double calculateQualityBonus(String title) {
@@ -454,7 +505,6 @@ public class RankCalculator {
         
         double range = maxScore - minScore;
         if (range < 0.001) range = 1.0;
-        
         for (PageNode p : pages) {
             double normalized = ((p.getScore() - minScore) / range) * 95 + 5;
             p.setScore(Math.round(normalized * 10) / 10.0);
