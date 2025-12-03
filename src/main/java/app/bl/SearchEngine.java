@@ -1,47 +1,79 @@
 package app.bl;
 
-import app.da.GoogleConnector;
-import app.da.LocationRecognizer;
-import java.time.LocalDate;
-import java.util.*;
-import java.time.OffsetDateTime;
-import java.time.Duration;
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.net.URI;
-import java.util.regex.*;
+import java.time.Duration;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import app.da.GoogleConnector;
+import app.da.LocationRecognizer;
 
 /**
- * SearchEngine - 搜尋演算法並計算結果
+ * SearchEngine - 搜尋演算法（改進版）
+ * 
+ * 改進內容：
+ * 1. 更好的活動過濾
+ * 2. 排除申請/辦法/須知頁面
+ * 3. 優先保留售票網站結果
  */
 public class SearchEngine {
 
+    // 活動相關關鍵字
     private static final List<String> EVENT_TERMS = List.of(
-            "活動", "展覽", "音樂", "演唱會", "市集", "節慶",
-            "festival", "concert", "exhibition", "event",
-            "表演", "藝術", "體驗", "親子", "戶外"
+        "活動", "展覽", "音樂", "演唱會", "市集", "節慶",
+        "festival", "concert", "exhibition", "event",
+        "表演", "藝術", "體驗", "親子", "戶外", "講座",
+        "工作坊", "派對", "路跑", "馬拉松"
+    );
+    
+    // 售票平台（優先保留）
+    private static final Set<String> TICKET_DOMAINS = Set.of(
+        "kktix", "accupass", "tixcraft", "opentix", 
+        "ticket", "ibon", "udnfunlife", "ticketplus"
+    );
+    
+    // 應該排除的頁面類型
+    private static final Set<String> EXCLUDE_KEYWORDS = Set.of(
+        "申請", "補助辦法", "徵選辦法", "作業要點", "實施計畫",
+        "徵件須知", "注意事項", "相關規定", "法規", "條例"
     );
 
     private static final Map<String, String> CITY_ALIASES = Map.ofEntries(
-            Map.entry("台北", "台北"),
-            Map.entry("臺北", "台北"),
-            Map.entry("taipei", "台北"),
-            Map.entry("新北", "新北"),
-            Map.entry("台中", "台中"),
-            Map.entry("臺中", "台中"),
-            Map.entry("taichung", "台中"),
-            Map.entry("台南", "台南"),
-            Map.entry("臺南", "台南"),
-            Map.entry("高雄", "高雄"),
-            Map.entry("kaohsiung", "高雄"),
-            Map.entry("桃園", "桃園"),
-            Map.entry("基隆", "基隆"),
-            Map.entry("新竹", "新竹"),
-            Map.entry("嘉義", "嘉義"),
-            Map.entry("宜蘭", "宜蘭"),
-            Map.entry("花蓮", "花蓮"),
-            Map.entry("台東", "台東")
+        Map.entry("台北", "台北"),
+        Map.entry("臺北", "台北"),
+        Map.entry("taipei", "台北"),
+        Map.entry("新北", "新北"),
+        Map.entry("台中", "台中"),
+        Map.entry("臺中", "台中"),
+        Map.entry("taichung", "台中"),
+        Map.entry("台南", "台南"),
+        Map.entry("臺南", "台南"),
+        Map.entry("高雄", "高雄"),
+        Map.entry("kaohsiung", "高雄"),
+        Map.entry("桃園", "桃園"),
+        Map.entry("基隆", "基隆"),
+        Map.entry("新竹", "新竹"),
+        Map.entry("嘉義", "嘉義"),
+        Map.entry("宜蘭", "宜蘭"),
+        Map.entry("花蓮", "花蓮"),
+        Map.entry("台東", "台東"),
+        Map.entry("苗栗", "苗栗"),
+        Map.entry("彰化", "彰化"),
+        Map.entry("南投", "南投"),
+        Map.entry("雲林", "雲林"),
+        Map.entry("屏東", "屏東")
     );
 
     private static Tree lastSearchTree;
@@ -59,15 +91,17 @@ public class SearchEngine {
                 }
             }
             if (!hasCity) {
-                query = userCity + " " + query;  // 如果查詢沒有包含城市，預設加入城市名稱
+                query = userCity + " " + query;
             }
         }
         
         String refinedQuery = refineQuery(query);
 
-        // 搜尋 Google 並過濾非活動相關的結果
+        // 搜尋 Google
         List<GoogleConnector.Result> raw = GoogleConnector.search(refinedQuery, 10);
-        List<GoogleConnector.Result> results = filterEventLike(raw);
+        
+        // 過濾結果
+        List<GoogleConnector.Result> results = filterResults(raw);
         
         Set<String> seenLinks = new HashSet<>();
         Set<String> seenTitles = new HashSet<>();
@@ -78,12 +112,12 @@ public class SearchEngine {
             if (!t.isBlank()) qTokens.add(t.trim());
         }
 
-        // 偵測並處理城市
+        // 偵測城市
         String city = LocationRecognizer.extractCity(query);
         if (city == null || city.isEmpty()) {
-            city = detectCityFromQuery(query);  // 若查詢中未提及城市，嘗試提取城市
+            city = detectCityFromQuery(query);
         }
-        // 使用時間 API 取得當前日期以避免本機時鐘誤差，失敗時 fallback 到本機時間
+        
         LocalDate today = fetchCurrentDate();
 
         for (GoogleConnector.Result r : results) {
@@ -96,7 +130,7 @@ public class SearchEngine {
             if (!seenLinks.add(linkKey)) continue;
             if (!seenTitles.add(titleKey)) continue;
             
-            // 標題相似度檢查，避免重複的標題
+            // 標題相似度檢查
             String titlePrefix = titleKey.length() > 20 ? titleKey.substring(0, 20) : titleKey;
             boolean isDuplicate = false;
             for (String seen : seenTitles) {
@@ -110,21 +144,18 @@ public class SearchEngine {
             // 解析日期
             LocalDate eventDate = extractDateFromTitle(r.title);
 
-            // 只過濾掉「有日期且已過期」的活動
-            // 沒有日期的保留（可能是活動列表頁面或即將公告的活動）
+            // 過濾已過期活動
             if (eventDate != null && eventDate.isBefore(today)) {
-                continue;  // 已過期的活動過濾掉
+                continue;
             }
 
             Map<Keyword, Integer> tf = new HashMap<>();
             
-            // 解析查詢中的關鍵字頻率
             for (String t : qTokens) {
                 Keyword k = Keyword.of(t);
                 tf.put(k, tf.getOrDefault(k, 0) + 1);
             }
             
-            // 處理活動關鍵字
             String titleLower = r.title.toLowerCase(Locale.ROOT);
             for (String term : EVENT_TERMS) {
                 if (titleLower.contains(term.toLowerCase())) {
@@ -133,7 +164,6 @@ public class SearchEngine {
                 }
             }
 
-            // 添加查詢關鍵字到 tokens 中
             List<String> tokens = new ArrayList<>(qTokens);
             for (String term : EVENT_TERMS) {
                 if (titleLower.contains(term.toLowerCase())) {
@@ -148,16 +178,15 @@ public class SearchEngine {
             if (eventCity == null) eventCity = "";
 
             PageNode p = PageNode.of(
-                    r.link,
-                    r.title,
-                    tf,
-                    eventDate,
-                    eventCity,
-                    extractDomain(r.link),
-                    tokens
+                r.link,
+                r.title,
+                tf,
+                eventDate,
+                eventCity,
+                extractDomain(r.link),
+                tokens
             );
             
-            // 更新使用者的習慣行為
             for (String token : tokens) {
                 user.bumpHabit(token);
             }
@@ -165,7 +194,7 @@ public class SearchEngine {
             pages.add(p);
         }
 
-        // 樹結構和分數排名
+        // 建立樹結構和排名
         Tree tree = new Tree();
         tree.addPages(pages);
         
@@ -180,43 +209,109 @@ public class SearchEngine {
         return lastSearchTree;
     }
 
+    /**
+     * 改進版查詢優化
+     */
     private static String refineQuery(String query) {
         String q = query == null ? "" : query.trim();
         if (q.isEmpty()) return q;
 
         String lower = q.toLowerCase(Locale.ROOT);
         boolean looksLikeCity = CITY_ALIASES.keySet().stream()
-                .anyMatch(alias -> lower.contains(alias.toLowerCase(Locale.ROOT)));
+            .anyMatch(alias -> lower.contains(alias.toLowerCase(Locale.ROOT)));
 
         if (looksLikeCity) {
-            q += " 活動 OR 展覽 OR 音樂 OR 節慶 OR 市集";
+            // 如果只有城市名，加入活動相關詞
+            q += " 活動 OR 展覽 OR 演唱會 OR 音樂會 OR 市集";
         }
+        
+        // 加入排除條件，過濾申請/辦法頁面
+        q += " -申請辦法 -徵選 -補助要點";
+        
         return q;
     }
 
-    private static List<GoogleConnector.Result> filterEventLike(List<GoogleConnector.Result> input) {
-        List<GoogleConnector.Result> out = new ArrayList<>();
+    /**
+     * 改進版結果過濾
+     */
+    private static List<GoogleConnector.Result> filterResults(List<GoogleConnector.Result> input) {
+        List<GoogleConnector.Result> priorityResults = new ArrayList<>();  // 售票網站
+        List<GoogleConnector.Result> normalResults = new ArrayList<>();    // 一般結果
+        
         for (GoogleConnector.Result r : input) {
             if (r == null || r.title == null || r.link == null) continue;
-            
             if (r.title.contains("Google Custom Search")) continue;
             
-            String t = r.title.toLowerCase(Locale.ROOT);
+            String title = r.title.toLowerCase(Locale.ROOT);
             String link = r.link.toLowerCase(Locale.ROOT);
-
-            boolean hit = false;
-            for (String term : EVENT_TERMS) {
-                String tt = term.toLowerCase(Locale.ROOT);
-                if (t.contains(tt) || link.contains(tt)) {
-                    hit = true;
+            
+            // 排除申請/辦法頁面
+            boolean shouldExclude = false;
+            for (String exclude : EXCLUDE_KEYWORDS) {
+                if (title.contains(exclude)) {
+                    shouldExclude = true;
                     break;
                 }
             }
-            if (hit) out.add(r);
+            if (shouldExclude) continue;
+            
+            // 排除純下載/表格頁面
+            if (title.contains("下載專區") || title.contains("表格下載") || 
+                title.contains("申請表") || title.contains("書表")) {
+                continue;
+            }
+            
+            // 檢查是否為售票網站
+            boolean isTicketSite = false;
+            for (String ticket : TICKET_DOMAINS) {
+                if (link.contains(ticket)) {
+                    isTicketSite = true;
+                    break;
+                }
+            }
+            
+            // 檢查是否含活動關鍵字
+            boolean hasEventTerm = false;
+            for (String term : EVENT_TERMS) {
+                if (title.contains(term.toLowerCase()) || link.contains(term.toLowerCase())) {
+                    hasEventTerm = true;
+                    break;
+                }
+            }
+            
+            if (isTicketSite) {
+                priorityResults.add(r);  // 售票網站優先
+            } else if (hasEventTerm) {
+                normalResults.add(r);
+            }
         }
         
-        if (out.isEmpty()) return input;
-        return out;
+        // 合併結果：售票網站在前
+        List<GoogleConnector.Result> combined = new ArrayList<>();
+        combined.addAll(priorityResults);
+        combined.addAll(normalResults);
+        
+        // 如果過濾後沒有結果，回傳原始結果（但排除明顯非活動頁面）
+        if (combined.isEmpty()) {
+            for (GoogleConnector.Result r : input) {
+                if (r == null || r.title == null || r.link == null) continue;
+                String title = r.title.toLowerCase();
+                
+                // 即使沒有活動關鍵字，也排除申請/辦法頁面
+                boolean exclude = false;
+                for (String kw : EXCLUDE_KEYWORDS) {
+                    if (title.contains(kw)) {
+                        exclude = true;
+                        break;
+                    }
+                }
+                if (!exclude) {
+                    combined.add(r);
+                }
+            }
+        }
+        
+        return combined;
     }
 
     private static String detectCityFromQuery(String query) {
@@ -262,7 +357,7 @@ public class SearchEngine {
             } catch (Exception e) {}
         }
         
-        // Pattern 2: 10/26 或 10.26 或 10-26 (沒有年份，假設今年或明年)
+        // Pattern 2: 10/26 或 10.26
         Pattern p2 = Pattern.compile("(?<!\\d)(\\d{1,2})[./\\-](\\d{1,2})(?!\\d)");
         Matcher m2 = p2.matcher(title);
         while (m2.find()) {
@@ -271,7 +366,6 @@ public class SearchEngine {
                 int day = Integer.parseInt(m2.group(2));
                 if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
                     LocalDate date = LocalDate.of(today.getYear(), month, day);
-                    // 如果日期已過，假設是明年
                     if (date.isBefore(today)) {
                         date = date.plusYears(1);
                     }
@@ -298,29 +392,23 @@ public class SearchEngine {
         }
         
         if (foundDates.isEmpty()) return null;
-        
-        // 回傳最晚的日期（結束日期）
         return foundDates.stream().max(LocalDate::compareTo).orElse(null);
     }
-    /**
-     * 試圖從公共時間 API 取得目前的日期（UTC 或區域時間），若失敗則回傳本機系統日期。
-     */
+    
     private static LocalDate fetchCurrentDate() {
-        // worldtimeapi.org 提供簡單的 JSON 回應，其中包含 datetime 欄位
         String api = "http://worldtimeapi.org/api/ip";
         try {
             HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(3))
-                    .build();
+                .connectTimeout(Duration.ofSeconds(3))
+                .build();
             HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(api))
-                    .timeout(Duration.ofSeconds(3))
-                    .GET()
-                    .build();
+                .uri(URI.create(api))
+                .timeout(Duration.ofSeconds(3))
+                .GET()
+                .build();
             HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() == 200) {
                 String body = resp.body();
-                // 找出 "datetime" 字段的值（例如 "2025-11-20T13:45:00.123+08:00"）
                 int idx = body.indexOf("\"datetime\"");
                 if (idx >= 0) {
                     int colon = body.indexOf(':', idx);
@@ -331,15 +419,11 @@ public class SearchEngine {
                         try {
                             OffsetDateTime odt = OffsetDateTime.parse(dt);
                             return odt.toLocalDate();
-                        } catch (Exception ex) {
-                            // ignore parse error and fallback
-                        }
+                        } catch (Exception ex) {}
                     }
                 }
             }
-        } catch (Exception e) {
-            // ignore network/timeout errors and fallback to system date
-        }
+        } catch (Exception e) {}
         return LocalDate.now();
     }
 }

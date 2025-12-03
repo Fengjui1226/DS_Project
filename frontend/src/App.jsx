@@ -1,4 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import SearchBar from './components/SearchBar';
+import ResultCard from './components/ResultCard';
+import Sidebar from './components/Sidebar';
+import Pagination from './components/Pagination';
+import SubpageModal from './components/SubpageModal';
+import SearchHistory from './components/SearchHistory';
+import './index.css';
 
 const API_BASE = '/api';
 
@@ -9,6 +16,7 @@ const cities = [
 ];
 
 export default function App() {
+  // 狀態管理
   const [view, setView] = useState('home');
   const [query, setQuery] = useState('');
   const [city, setCity] = useState('台北');
@@ -18,7 +26,32 @@ export default function App() {
   const [categories, setCategories] = useState([]);
   const [semantic, setSemantic] = useState(null);
   const [tree, setTree] = useState(null);
+  
+  // 分頁
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  
+  // 收藏
+  const [favorites, setFavorites] = useState(() => {
+    const saved = localStorage.getItem('eventfinder_favorites');
+    return saved ? JSON.parse(saved) : [];
+  });
+  
+  // 搜尋歷史
+  const [searchHistory, setSearchHistory] = useState(() => {
+    const saved = localStorage.getItem('eventfinder_history');
+    return saved ? JSON.parse(saved) : [];
+  });
+  
+  // 子網頁彈窗
+  const [subpageModal, setSubpageModal] = useState({ open: false, domain: '', data: null });
+  
+  // 搜尋建議
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
+  // 載入分類
   useEffect(() => {
     fetch(`${API_BASE}/categories`)
       .then(res => res.json())
@@ -26,20 +59,56 @@ export default function App() {
       .catch(console.error);
   }, []);
 
-  const handleSearch = async (q = query, c = city) => {
+  // 儲存收藏到 localStorage
+  useEffect(() => {
+    localStorage.setItem('eventfinder_favorites', JSON.stringify(favorites));
+  }, [favorites]);
+
+  // 儲存歷史到 localStorage
+  useEffect(() => {
+    localStorage.setItem('eventfinder_history', JSON.stringify(searchHistory));
+  }, [searchHistory]);
+
+  // 搜尋建議
+  const fetchSuggestions = useCallback(async (q) => {
+    if (!q || q.length < 1) {
+      setSuggestions([]);
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/suggestions?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      setSuggestions(data.suggestions || []);
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
+  // 搜尋
+  const handleSearch = async (q = query, c = city, page = 1) => {
     if (!q.trim()) return;
     
     setLoading(true);
     setError(null);
     setQuery(q);
     setCity(c);
+    setCurrentPage(page);
+    setShowSuggestions(false);
+    
+    // 更新搜尋歷史
+    const newHistory = [q, ...searchHistory.filter(h => h !== q)].slice(0, 10);
+    setSearchHistory(newHistory);
     
     try {
-      const res = await fetch(`${API_BASE}/search?query=${encodeURIComponent(q)}&city=${encodeURIComponent(c)}`);
+      const res = await fetch(
+        `${API_BASE}/search?query=${encodeURIComponent(q)}&city=${encodeURIComponent(c)}&page=${page}`
+      );
       const data = await res.json();
       
       if (data.success) {
         setResults(data.results);
+        setTotalPages(data.totalPages);
+        setTotalCount(data.totalCount);
         setView('results');
         loadSemantic();
         loadTree();
@@ -69,6 +138,32 @@ export default function App() {
     } catch (e) {}
   };
 
+  // 子網頁查詢
+  const handleSubpageQuery = async (domain) => {
+    try {
+      const res = await fetch(`${API_BASE}/subpages?domain=${encodeURIComponent(domain)}`);
+      const data = await res.json();
+      if (data.success) {
+        setSubpageModal({ open: true, domain, data });
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // 收藏功能
+  const toggleFavorite = (result) => {
+    const exists = favorites.find(f => f.url === result.url);
+    if (exists) {
+      setFavorites(favorites.filter(f => f.url !== result.url));
+    } else {
+      setFavorites([...favorites, { ...result, savedAt: new Date().toISOString() }]);
+    }
+  };
+
+  const isFavorite = (url) => favorites.some(f => f.url === url);
+
+  // 定位
   const handleLocate = () => {
     if (!navigator.geolocation) return alert('瀏覽器不支援定位');
     navigator.geolocation.getCurrentPosition(
@@ -86,23 +181,30 @@ export default function App() {
     );
   };
 
+  // 清除歷史
+  const clearHistory = () => {
+    setSearchHistory([]);
+  };
+
+  // 首頁
   if (view === 'home') {
     return (
       <div className="app">
         <div className="bg" />
-        <div className="home">
+        <div className="home animate-fade-in">
           <div className="brand">
             <div className="logo">🎪</div>
             <h1>EventFinder</h1>
             <p className="tagline">探索台灣精彩活動</p>
           </div>
 
-          <div className="search-card">
+          <div className="search-card glass">
             <div className="categories">
               {categories.map(cat => (
                 <button 
                   key={cat.id} 
                   className="cat-btn"
+                  style={{ '--cat-color': cat.color }}
                   onClick={() => handleSearch(cat.query, city)}
                 >
                   <span>{cat.icon}</span> {cat.name}
@@ -110,51 +212,62 @@ export default function App() {
               ))}
             </div>
 
-            <div className="search-row">
-              <input
-                type="text"
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleSearch()}
-                placeholder="搜尋音樂會、展覽、市集..."
-                className="search-input"
-              />
-              <select 
-                value={city} 
-                onChange={e => setCity(e.target.value)}
-                className="city-select"
-              >
-                {cities.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-
-            <div className="btn-row">
-              <button className="btn-locate" onClick={handleLocate}>📍</button>
-              <button className="btn-search" onClick={() => handleSearch()}>
-                {loading ? '搜尋中...' : '探索活動'}
-              </button>
-            </div>
+            <SearchBar
+              query={query}
+              setQuery={setQuery}
+              city={city}
+              setCity={setCity}
+              cities={cities}
+              onSearch={handleSearch}
+              onLocate={handleLocate}
+              loading={loading}
+              suggestions={suggestions}
+              showSuggestions={showSuggestions}
+              setShowSuggestions={setShowSuggestions}
+              fetchSuggestions={fetchSuggestions}
+            />
 
             {error && <div className="error">{error}</div>}
+            
+            {searchHistory.length > 0 && (
+              <SearchHistory 
+                history={searchHistory} 
+                onSelect={(q) => handleSearch(q, city)}
+                onClear={clearHistory}
+              />
+            )}
           </div>
 
           <div className="features">
-            <div className="feature">
+            <div className="feature animate-slide-up" style={{ animationDelay: '0.1s' }}>
               <span>⚡</span>
               <h3>即時更新</h3>
               <p>自動過濾過期活動</p>
             </div>
-            <div className="feature">
+            <div className="feature animate-slide-up" style={{ animationDelay: '0.2s' }}>
               <span>🎯</span>
               <h3>精準排序</h3>
               <p>AI 智慧權重計算</p>
             </div>
-            <div className="feature">
+            <div className="feature animate-slide-up" style={{ animationDelay: '0.3s' }}>
               <span>📍</span>
               <h3>在地優先</h3>
               <p>依你的位置排序</p>
             </div>
           </div>
+
+          {favorites.length > 0 && (
+            <div className="favorites-preview glass">
+              <h3>❤️ 我的收藏 ({favorites.length})</h3>
+              <div className="favorites-list">
+                {favorites.slice(0, 3).map((fav, i) => (
+                  <a key={i} href={fav.url} target="_blank" rel="noopener noreferrer" className="fav-item">
+                    {fav.title}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
 
           <footer>Built with ❤️ for Taiwan</footer>
         </div>
@@ -162,43 +275,43 @@ export default function App() {
     );
   }
 
+  // 結果頁
   return (
     <div className="app">
       <div className="bg" />
       
-      <header className="header">
+      <header className="header glass">
         <div className="header-brand" onClick={() => setView('home')}>
           <span className="header-logo">🎪</span>
           <span className="header-title">EventFinder</span>
         </div>
         
-        <div className="header-search">
-          <input
-            type="text"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSearch()}
-            placeholder="搜尋活動..."
-            className="search-input compact"
-          />
-          <select 
-            value={city} 
-            onChange={e => setCity(e.target.value)}
-            className="city-select compact"
-          >
-            {cities.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <button className="btn-search compact" onClick={() => handleSearch()}>
-            搜尋
-          </button>
-        </div>
+        <SearchBar
+          query={query}
+          setQuery={setQuery}
+          city={city}
+          setCity={setCity}
+          cities={cities}
+          onSearch={handleSearch}
+          onLocate={handleLocate}
+          loading={loading}
+          compact
+          suggestions={suggestions}
+          showSuggestions={showSuggestions}
+          setShowSuggestions={setShowSuggestions}
+          fetchSuggestions={fetchSuggestions}
+        />
       </header>
 
       <main className="main">
         <div className="results-section">
-          <div className="results-header">
+          <div className="results-header animate-fade-in">
             <h2>搜尋結果</h2>
-            <p>關鍵字：{query} | 城市：{city} | 共 {results.length} 筆</p>
+            <p>
+              關鍵字：<strong>{query}</strong> | 
+              城市：<strong>{city}</strong> | 
+              共 <strong>{totalCount}</strong> 筆
+            </p>
           </div>
 
           {loading && (
@@ -208,103 +321,54 @@ export default function App() {
             </div>
           )}
 
-          {error && <div className="error-box">⚠️ {error}</div>}
+          {error && <div className="error-box animate-shake">⚠️ {error}</div>}
 
           {!loading && results.length === 0 && (
-            <div className="no-results">
+            <div className="no-results animate-fade-in">
               <span>🔍</span>
               <p>沒有找到相關活動</p>
             </div>
           )}
 
           <div className="results-list">
-            {results.map(r => (
-              <div key={r.rank} className="result-card">
-                <div className="result-top">
-                  <span className="rank">#{r.rank}</span>
-                  <span className="score">{r.score.toFixed(1)}</span>
-                </div>
-                <h3>
-                  <a href={r.url} target="_blank" rel="noopener noreferrer">
-                    {r.title}
-                  </a>
-                </h3>
-                <div className="result-meta">
-                  {r.city && <span>📍 {r.city}</span>}
-                  {r.eventDate && <span>📅 {r.eventDate}</span>}
-                  <span>🌐 {r.domain}</span>
-                </div>
-                <a href={r.url} target="_blank" rel="noopener noreferrer" className="result-link">
-                  前往官方網站 →
-                </a>
-              </div>
+            {results.map((r, index) => (
+              <ResultCard 
+                key={r.rank} 
+                result={r}
+                index={index}
+                isFavorite={isFavorite(r.url)}
+                onToggleFavorite={() => toggleFavorite(r)}
+                onSubpageQuery={() => handleSubpageQuery(r.domain)}
+              />
             ))}
           </div>
+
+          {totalPages > 1 && (
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={(page) => handleSearch(query, city, page)}
+            />
+          )}
         </div>
 
-        <aside className="sidebar">
-          {tree && tree.domains && (
-            <div className="panel">
-              <h3>📊 網站結構</h3>
-              <div className="domain-list">
-                {tree.domains.map((d, i) => (
-                  <div key={i} className="domain-item">
-                    <span>{d.domain}</span>
-                    <span className="domain-score">{d.totalScore.toFixed(1)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {semantic && (
-            <div className="panel">
-              <h3>🧠 語意分析</h3>
-              {semantic.extractedKeywords?.length > 0 && (
-                <div className="keyword-section">
-                  <h4>提取的關鍵字</h4>
-                  <div className="keywords">
-                    {semantic.extractedKeywords.slice(0, 8).map((kw, i) => (
-                      <button 
-                        key={i} 
-                        className="keyword"
-                        onClick={() => handleSearch(kw, city)}
-                      >
-                        {kw}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {semantic.suggestedKeywords?.length > 0 && (
-                <div className="keyword-section">
-                  <h4>建議關鍵字</h4>
-                  <div className="keywords">
-                    {semantic.suggestedKeywords.slice(0, 5).map((kw, i) => (
-                      <button 
-                        key={i} 
-                        className="keyword suggested"
-                        onClick={() => handleSearch(kw, city)}
-                      >
-                        {kw}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="panel tips">
-            <h3>💡 搜尋提示</h3>
-            <ul>
-              <li>點擊關鍵字可快速搜尋</li>
-              <li>分數越高表示活動越相關</li>
-              <li>支援多關鍵字搜尋</li>
-            </ul>
-          </div>
-        </aside>
+        <Sidebar 
+          semantic={semantic}
+          tree={tree}
+          favorites={favorites}
+          onKeywordClick={(kw) => handleSearch(kw, city)}
+          onDomainClick={handleSubpageQuery}
+          onFavoriteRemove={(url) => setFavorites(favorites.filter(f => f.url !== url))}
+        />
       </main>
+
+      {subpageModal.open && (
+        <SubpageModal
+          domain={subpageModal.domain}
+          data={subpageModal.data}
+          onClose={() => setSubpageModal({ open: false, domain: '', data: null })}
+        />
+      )}
     </div>
   );
 }

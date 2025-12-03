@@ -1,362 +1,455 @@
 package app.web;
 
-import app.bl.Keyword;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import com.sun.net.httpserver.Headers;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+
 import app.bl.PageNode;
 import app.bl.SearchEngine;
 import app.bl.SemanticAnalyzer;
 import app.bl.Tree;
 import app.bl.UserProfile;
-import java.util.LinkedHashMap;
 
-import com.sun.net.httpserver.HttpServer;
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.Headers;
-
-import java.io.*;
-import java.net.InetSocketAddress;
-import java.net.URI;
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
-import java.util.*;
-
+/**
+ * Enhanced REST API Server for EventFinder
+ * 提供 JSON API 給 React 前端使用
+ */
 public class SimpleServer {
+    
+    private static final String FRONTEND_DIR = "frontend/dist";
+    
+    // 搜尋建議關鍵字庫
+    private static final List<String> SUGGESTION_KEYWORDS = Arrays.asList(
+        "音樂 演唱會", "音樂節", "音樂會 古典", "音樂 爵士",
+        "展覽 藝術", "展覽 當代", "展覽 攝影", "展覽 免費",
+        "市集 文創", "市集 假日", "市集 農夫", "市集 手作",
+        "戶外 露營", "戶外 健行", "戶外 野餐", "戶外 登山",
+        "親子 兒童", "親子 DIY", "親子 免費", "親子 室內",
+        "運動 路跑", "運動 籃球", "運動 瑜伽", "運動 健身",
+        "美食 餐廳", "美食節", "美食 夜市", "美食 甜點",
+        "科技 展覽", "科技 講座", "科技 AI", "科技 創業",
+        "電影 首映", "電影 戶外", "電影 影展",
+        "講座 免費", "講座 職涯", "講座 理財",
+        "派對 音樂", "派對 聖誕", "派對 跨年",
+        "工作坊 手作", "工作坊 烘焙", "工作坊 繪畫",
+        "台北 活動", "台中 活動", "高雄 活動", "台南 活動",
+        "免費 活動", "週末 活動", "今日 活動"
+    );
+    
+    // 儲存最近搜尋（簡易版，實際應用應該用資料庫）
+    private static final List<String> recentSearches = Collections.synchronizedList(new ArrayList<>());
+    
     public static void main(String[] args) throws Exception {
         int port = 8080;
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
-        server.createContext("/", SimpleServer::handleIndex);
-        server.createContext("/search", SimpleServer::handleSearch);
-        server.createContext("/tree", SimpleServer::handleTree);
-        server.createContext("/semantic", SimpleServer::handleSemantic);
-        server.createContext("/static/", SimpleServer::handleStatic);
+        
+        // API 路由
+        server.createContext("/api/search", SimpleServer::handleSearchAPI);
+        server.createContext("/api/tree", SimpleServer::handleTreeAPI);
+        server.createContext("/api/semantic", SimpleServer::handleSemanticAPI);
+        server.createContext("/api/categories", SimpleServer::handleCategoriesAPI);
+        server.createContext("/api/suggestions", SimpleServer::handleSuggestionsAPI);
+        server.createContext("/api/subpages", SimpleServer::handleSubpagesAPI);
+        server.createContext("/api/history", SimpleServer::handleHistoryAPI);
+        
+        // 靜態檔案服務
+        server.createContext("/", SimpleServer::handleStatic);
+        
         server.setExecutor(null);
         server.start();
-        System.out.println("SimpleServer started at http://localhost:" + port);
-        // Keep the main thread alive so the HttpServer threads keep running
-        final Object waitLock = new Object();
-        synchronized (waitLock) {
-            try {
-                waitLock.wait();
-            } catch (InterruptedException ie) {
-                // restore interrupt status and exit
+        System.out.println("╔════════════════════════════════════════════╗");
+        System.out.println("║   🎪 EventFinder API Server Started!       ║");
+        System.out.println("║   Backend API: http://localhost:" + port + "        ║");
+        System.out.println("║   React Dev:   http://localhost:3000       ║");
+        System.out.println("╚════════════════════════════════════════════╝");
+        
+        final Object lock = new Object();
+        synchronized (lock) {
+            try { lock.wait(); } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
         }
     }
 
-    private static void handleIndex(HttpExchange ex) throws IOException {
-        String html = "<!doctype html>\n" +
-            "<html lang=\"zh-TW\">\n" +
-            "<head>\n" +
-            "  <meta charset=\"utf-8\">\n" +
-            "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n" +
-            "  <title>EventFinder 台灣活動搜尋</title>\n" +
-            "  <link href=\"https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap\" rel=\"stylesheet\">\n" +
-            "  <style>\n" +
-            "    *{box-sizing:border-box;margin:0;padding:0}\n" +
-            "    body{font-family:'Noto Sans TC',sans-serif;background:#0f0f0f;color:#fff;min-height:100vh;overflow-x:hidden}\n" +
-            "    .bg{position:fixed;top:0;left:0;width:100%;height:100%;z-index:-1}\n" +
-            "    .bg::before{content:'';position:absolute;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(circle at 30% 70%,rgba(255,107,107,0.08) 0%,transparent 50%),radial-gradient(circle at 70% 30%,rgba(78,205,196,0.08) 0%,transparent 50%)}\n" +
-            "    .container{max-width:700px;width:90%;margin:0 auto;padding:60px 0;min-height:100vh;display:flex;flex-direction:column;justify-content:center}\n" +
-            "    .brand{text-align:center;margin-bottom:48px}\n" +
-            "    .logo{font-size:64px;margin-bottom:16px;filter:drop-shadow(0 0 30px rgba(255,107,107,0.3))}\n" +
-            "    h1{font-size:42px;font-weight:700;background:linear-gradient(135deg,#fff 0%,#a0a0a0 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:-1px}\n" +
-            "    .tagline{color:#666;font-size:15px;margin-top:8px;letter-spacing:2px}\n" +
-            "    .search-card{background:rgba(255,255,255,0.03);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.06);border-radius:24px;padding:32px;box-shadow:0 20px 60px rgba(0,0,0,0.3)}\n" +
-            "    .categories{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-bottom:24px}\n" +
-            "    .cat{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);padding:8px 16px;border-radius:20px;font-size:13px;color:#888;cursor:pointer;transition:all 0.3s ease}\n" +
-            "    .cat:hover{background:rgba(255,107,107,0.15);border-color:rgba(255,107,107,0.3);color:#ff6b6b;transform:translateY(-2px)}\n" +
-            "    .input-row{display:flex;gap:12px;margin-bottom:20px}\n" +
-            "    input{flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);padding:16px 20px;border-radius:12px;font-size:16px;color:#fff;transition:all 0.3s ease}\n" +
-            "    input::placeholder{color:#555}\n" +
-            "    input:focus{outline:none;border-color:rgba(255,107,107,0.5);box-shadow:0 0 20px rgba(255,107,107,0.1)}\n" +
-            "    select{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);padding:16px;border-radius:12px;font-size:14px;color:#fff;cursor:pointer;min-width:100px}\n" +
-            "    select option{background:#1a1a1a;color:#fff}\n" +
-            "    .btn-row{display:flex;gap:12px}\n" +
-            "    button{flex:1;background:linear-gradient(135deg,#ff6b6b 0%,#ee5a5a 100%);border:none;padding:16px;border-radius:12px;font-size:16px;font-weight:600;color:#fff;cursor:pointer;transition:all 0.3s ease;box-shadow:0 4px 20px rgba(255,107,107,0.3)}\n" +
-            "    button:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(255,107,107,0.4)}\n" +
-            "    .btn-locate{flex:0 0 auto;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);padding:16px 20px;border-radius:12px;font-size:16px;color:#888;cursor:pointer;transition:all 0.3s ease}\n" +
-            "    .btn-locate:hover{background:rgba(78,205,196,0.15);border-color:rgba(78,205,196,0.3);color:#4ecdc4}\n" +
-            "    .btn-locate.active{background:rgba(78,205,196,0.2);border-color:rgba(78,205,196,0.5);color:#4ecdc4}\n" +
-            "    .features{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:48px}\n" +
-            "    .feat{text-align:center;padding:20px}\n" +
-            "    .feat-icon{font-size:28px;margin-bottom:12px}\n" +
-            "    .feat-title{font-size:13px;font-weight:500;color:#fff;margin-bottom:4px}\n" +
-            "    .feat-desc{font-size:11px;color:#555}\n" +
-            "    .footer{text-align:center;margin-top:48px;color:#333;font-size:12px}\n" +
-            "    .location-status{text-align:center;font-size:12px;color:#4ecdc4;margin-top:12px;min-height:18px}\n" +
-            "    @media(max-width:600px){.input-row{flex-direction:column}select{width:100%}.features{grid-template-columns:1fr}h1{font-size:32px}.btn-row{flex-direction:column}}\n" +
-            "  </style>\n" +
-            "</head>\n" +
-            "<body>\n" +
-            "<div class=\"bg\"></div>\n" +
-            "<div class=\"container\">\n" +
-            "  <div class=\"brand\">\n" +
-            "    <div class=\"logo\">🎪</div>\n" +
-            "    <h1>EventFinder</h1>\n" +
-            "    <p class=\"tagline\">DISCOVER EVENTS IN TAIWAN</p>\n" +
-            "  </div>\n" +
-            "  <div class=\"search-card\">\n" +
-            "    <form action=\"/search\" method=\"get\">\n" +
-            "      <div class=\"categories\">\n" +
-            "        <span class=\"cat\" onclick=\"setQuery('音樂 演唱會')\">🎵 音樂</span>\n" +
-            "        <span class=\"cat\" onclick=\"setQuery('展覽 藝術')\">🎨 展覽</span>\n" +
-            "        <span class=\"cat\" onclick=\"setQuery('市集 文創')\">🛍️ 市集</span>\n" +
-            "        <span class=\"cat\" onclick=\"setQuery('戶外 露營')\">⛺ 戶外</span>\n" +
-            "        <span class=\"cat\" onclick=\"setQuery('親子 兒童')\">👶 親子</span>\n" +
-            "      </div>\n" +
-            "      <div class=\"input-row\">\n" +
-            "        <input id=\"q\" name=\"query\" placeholder=\"搜尋音樂會、展覽、市集...\" autocomplete=\"off\" />\n" +
-            "        <select id=\"city\" name=\"city\">\n" +
-            "          <option value=\"台北\">台北</option>\n" +
-            "          <option value=\"新北\">新北</option>\n" +
-            "          <option value=\"桃園\">桃園</option>\n" +
-            "          <option value=\"台中\">台中</option>\n" +
-            "          <option value=\"台南\">台南</option>\n" +
-            "          <option value=\"高雄\">高雄</option>\n" +
-            "          <option value=\"基隆\">基隆</option>\n" +
-            "          <option value=\"新竹\">新竹</option>\n" +
-            "          <option value=\"苗栗\">苗栗</option>\n" +
-            "          <option value=\"彰化\">彰化</option>\n" +
-            "          <option value=\"南投\">南投</option>\n" +
-            "          <option value=\"雲林\">雲林</option>\n" +
-            "          <option value=\"嘉義\">嘉義</option>\n" +
-            "          <option value=\"屏東\">屏東</option>\n" +
-            "          <option value=\"宜蘭\">宜蘭</option>\n" +
-            "          <option value=\"花蓮\">花蓮</option>\n" +
-            "          <option value=\"台東\">台東</option>\n" +
-            "        </select>\n" +
-            "      </div>\n" +
-            "      <div class=\"btn-row\">\n" +
-            "        <button type=\"button\" class=\"btn-locate\" id=\"locateBtn\" onclick=\"getLocation()\">📍</button>\n" +
-            "        <button type=\"submit\">探索活動</button>\n" +
-            "      </div>\n" +
-            "      <div class=\"location-status\" id=\"locStatus\"></div>\n" +
-            "    </form>\n" +
-            "  </div>\n" +
-            "  <div class=\"features\">\n" +
-            "    <div class=\"feat\">\n" +
-            "      <div class=\"feat-icon\">⚡</div>\n" +
-            "      <div class=\"feat-title\">即時更新</div>\n" +
-            "      <div class=\"feat-desc\">自動過濾過期活動</div>\n" +
-            "    </div>\n" +
-            "    <div class=\"feat\">\n" +
-            "      <div class=\"feat-icon\">🎯</div>\n" +
-            "      <div class=\"feat-title\">精準排序</div>\n" +
-            "      <div class=\"feat-desc\">AI 智慧權重計算</div>\n" +
-            "    </div>\n" +
-            "    <div class=\"feat\">\n" +
-            "      <div class=\"feat-icon\">📍</div>\n" +
-            "      <div class=\"feat-title\">在地優先</div>\n" +
-            "      <div class=\"feat-desc\">依你的位置排序</div>\n" +
-            "    </div>\n" +
-            "  </div>\n" +
-            "  <div class=\"footer\">Built with ❤️ for Taiwan</div>\n" +
-            "</div>\n" +
-            "<script>\n" +
-            "function setQuery(t){document.getElementById('q').value=t}\n" +
-            "function getLocation(){\n" +
-            "  var btn=document.getElementById('locateBtn');\n" +
-            "  var status=document.getElementById('locStatus');\n" +
-            "  if(!navigator.geolocation){status.textContent='瀏覽器不支援定位';return;}\n" +
-            "  status.textContent='定位中...';\n" +
-            "  btn.classList.add('active');\n" +
-            "  navigator.geolocation.getCurrentPosition(function(pos){\n" +
-            "    var lat=pos.coords.latitude;\n" +
-            "    var lng=pos.coords.longitude;\n" +
-            "    var city=detectCity(lat,lng);\n" +
-            "    document.getElementById('city').value=city;\n" +
-            "    status.textContent='已定位：'+city;\n" +
-            "  },function(err){\n" +
-            "    status.textContent='定位失敗：'+err.message;\n" +
-            "    btn.classList.remove('active');\n" +
-            "  });\n" +
-            "}\n" +
-            "function detectCity(lat,lng){\n" +
-            "  if(lat>25.0&&lng>121.4&&lng<121.7) return '台北';\n" +
-            "  if(lat>24.9&&lat<25.3&&lng>121.3&&lng<121.5) return '新北';\n" +
-            "  if(lat>24.9&&lat<25.1&&lng>121.2&&lng<121.4) return '桃園';\n" +
-            "  if(lat>24.0&&lat<24.3&&lng>120.5&&lng<120.8) return '台中';\n" +
-            "  if(lat>22.9&&lat<23.1&&lng>120.1&&lng<120.3) return '台南';\n" +
-            "  if(lat>22.5&&lat<22.8&&lng>120.2&&lng<120.4) return '高雄';\n" +
-            "  if(lat>25.1&&lng>121.7) return '基隆';\n" +
-            "  if(lat>24.7&&lat<24.9&&lng>120.9&&lng<121.1) return '新竹';\n" +
-            "  if(lat>24.3&&lat<24.7&&lng>120.7&&lng<121.0) return '苗栗';\n" +
-            "  if(lat>23.8&&lat<24.2&&lng>120.4&&lng<120.7) return '彰化';\n" +
-            "  if(lat>23.8&&lat<24.1&&lng>120.6&&lng<121.0) return '南投';\n" +
-            "  if(lat>23.5&&lat<23.9&&lng>120.1&&lng<120.6) return '雲林';\n" +
-            "  if(lat>23.4&&lat<23.6&&lng>120.3&&lng<120.5) return '嘉義';\n" +
-            "  if(lat>22.0&&lat<22.8&&lng>120.4&&lng<120.9) return '屏東';\n" +
-            "  if(lat>24.4&&lat<24.8&&lng>121.5&&lng<121.9) return '宜蘭';\n" +
-            "  if(lat>23.5&&lat<24.3&&lng>121.3&&lng<121.7) return '花蓮';\n" +
-            "  if(lat>22.3&&lat<23.5&&lng>120.8&&lng<121.5) return '台東';\n" +
-            "  return '台北';\n" +
-            "}\n" +
-            "</script>\n" +
-            "</body></html>";
-        sendHtml(ex, html);
-    }
-
-    private static void handleSearch(HttpExchange ex) throws IOException {
-        String query = getQueryParam(ex.getRequestURI(), "query");
-        String city = getQueryParam(ex.getRequestURI(), "city");
-        if (city == null) city = "台北";
-        if (query == null || query.trim().isEmpty()) query = "音樂 活動";
-
-        UserProfile user = new UserProfile();
-        user.setUserCity(city);
-        List<PageNode> results = Collections.emptyList();
-        
-        try {
-            results = SearchEngine.search(query, user);
-        } catch (Throwable t) {
-            StringWriter sw = new StringWriter();
-            t.printStackTrace(new PrintWriter(sw));
-            sendHtml(ex, "<pre>搜尋錯誤:\n" + escapeHtml(sw.toString()) + "</pre>");
+    // ==================== 搜尋 API ====================
+    private static void handleSearchAPI(HttpExchange ex) throws IOException {
+        setCorsHeaders(ex);
+        if ("OPTIONS".equals(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1);
             return;
         }
 
-        StringBuilder sb = new StringBuilder();
-        sb.append("<!doctype html><html><head><meta charset=\"utf-8\"><title>搜尋結果</title>");
-        sb.append("<style>");
-        sb.append("body{font-family:'Noto Sans TC',sans-serif;background:#0f0f0f;color:#fff;padding:24px;min-height:100vh}");
-        sb.append(".container{max-width:1200px;margin:0 auto}");
-        sb.append(".main{display:flex;gap:20px}");
-        sb.append(".results{flex:2}");
-        sb.append(".sidebar{flex:1}");
-        sb.append(".card{background:rgba(255,255,255,0.05);padding:16px;margin:12px 0;border-radius:12px;border:1px solid rgba(255,255,255,0.1)}");
-        sb.append(".score{background:#ff6b6b;padding:4px 10px;border-radius:6px;font-weight:bold;float:right;font-size:14px}");
-        sb.append(".meta{color:#888;font-size:13px;margin-top:8px}");
-        sb.append(".url{color:#4ecdc4;font-size:12px;word-break:break-all;margin-top:4px}");
-        sb.append("a{color:#fff;text-decoration:none}");
-        sb.append("a:hover{color:#ff6b6b}");
-        sb.append(".nav{margin:20px 0}");
-        sb.append(".btn{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);padding:10px 20px;border-radius:8px;cursor:pointer;text-decoration:none;color:#fff;margin-right:8px;transition:all 0.3s}");
-        sb.append(".btn:hover{background:rgba(255,107,107,0.2);border-color:rgba(255,107,107,0.3)}");
-        sb.append(".panel{background:rgba(255,255,255,0.03);padding:16px;border-radius:12px;margin-bottom:16px;border:1px solid rgba(255,255,255,0.06)}");
-        sb.append(".panel h3{margin:0 0 12px 0;font-size:14px;color:#ff6b6b}");
-        sb.append(".panel ul{margin:0;padding-left:20px;font-size:13px;color:#888}");
-        sb.append(".panel li{margin:4px 0}");
-        sb.append(".tree-item{font-family:monospace;font-size:12px;margin:4px 0;color:#888}");
-        sb.append("h2{color:#fff;font-size:24px;margin-bottom:8px}");
-        sb.append(".query-info{color:#888;font-size:14px;margin-bottom:20px}");
-        sb.append("@media(max-width:900px){.main{flex-direction:column}.sidebar{order:-1}}");
-        sb.append("</style>");
-        sb.append("</head><body><div class=\"container\">");
-        sb.append("<h2>搜尋結果</h2>");
-        sb.append("<div class=\"query-info\">關鍵字：" + escapeHtml(query) + " | 城市：" + escapeHtml(city) + "</div>");
-        sb.append("<div class=\"nav\"><a href=\"/\" class=\"btn\">← 返回首頁</a></div>");
+        String query = getQueryParam(ex.getRequestURI(), "query");
+        String city = getQueryParam(ex.getRequestURI(), "city");
+        String pageStr = getQueryParam(ex.getRequestURI(), "page");
+        int page = 1;
+        try { page = Integer.parseInt(pageStr); } catch (Exception e) {}
+        int pageSize = 10;
+        
+        if (city == null || city.isEmpty()) city = "台北";
+        if (query == null || query.trim().isEmpty()) query = "音樂 活動";
 
-        sb.append("<div class=\"main\">");
-        
-        // 左側：搜尋結果
-        sb.append("<div class=\"results\">");
-        if (results.isEmpty()) {
-            sb.append("<p style=\"color:#888\">沒有找到結果</p>");
-        } else {
-            int rank = 1;
-            for (PageNode p : results) {
-                sb.append("<div class=\"card\">");
-                sb.append("<span class=\"score\">" + String.format("%.1f", p.getScore()) + "</span>");
-                sb.append("<div><strong>#" + rank++ + "</strong> <a href=\"" + escapeHtml(p.getUrl()) + "\" target=\"_blank\">" + escapeHtml(p.getTitle()) + "</a></div>");
-                sb.append("<div class=\"meta\">");
-                if (p.getCity() != null && !p.getCity().isEmpty()) sb.append("📍 " + escapeHtml(p.getCity()) + " ");
-                if (p.getEventDate() != null) sb.append("📅 " + p.getEventDate() + " ");
-                sb.append("🌐 " + escapeHtml(p.getDomain()));
-                sb.append("</div>");
-                sb.append("<div class=\"url\"><a href=\"" + escapeHtml(p.getUrl()) + "\" target=\"_blank\">🌐 官方網站（點我）</a></div>");
-                sb.append("</div>");
+        // 記錄搜尋歷史
+        addToHistory(query);
+
+        UserProfile user = new UserProfile();
+        user.setUserCity(city);
+
+        try {
+            List<PageNode> allResults = SearchEngine.search(query, user);
+            
+            // 分頁處理
+            int totalResults = allResults.size();
+            int totalPages = (int) Math.ceil((double) totalResults / pageSize);
+            int startIdx = (page - 1) * pageSize;
+            int endIdx = Math.min(startIdx + pageSize, totalResults);
+            
+            List<PageNode> pagedResults = startIdx < totalResults 
+                ? allResults.subList(startIdx, endIdx) 
+                : Collections.emptyList();
+            
+            StringBuilder json = new StringBuilder();
+            json.append("{");
+            json.append("\"success\":true,");
+            json.append("\"query\":\"").append(escapeJson(query)).append("\",");
+            json.append("\"city\":\"").append(escapeJson(city)).append("\",");
+            json.append("\"totalCount\":").append(totalResults).append(",");
+            json.append("\"page\":").append(page).append(",");
+            json.append("\"totalPages\":").append(totalPages).append(",");
+            json.append("\"pageSize\":").append(pageSize).append(",");
+            json.append("\"results\":[");
+            
+            for (int i = 0; i < pagedResults.size(); i++) {
+                PageNode p = pagedResults.get(i);
+                int actualRank = startIdx + i + 1;
+                if (i > 0) json.append(",");
+                json.append("{");
+                json.append("\"rank\":").append(actualRank).append(",");
+                json.append("\"title\":\"").append(escapeJson(p.getTitle())).append("\",");
+                json.append("\"url\":\"").append(escapeJson(p.getUrl())).append("\",");
+                json.append("\"score\":").append(String.format("%.2f", p.getScore())).append(",");
+                json.append("\"city\":\"").append(escapeJson(p.getCity() != null ? p.getCity() : "")).append("\",");
+                json.append("\"domain\":\"").append(escapeJson(p.getDomain())).append("\",");
+                json.append("\"eventDate\":").append(p.getEventDate() != null ? "\"" + p.getEventDate() + "\"" : "null").append(",");
+                json.append("\"snippet\":\"").append(escapeJson(generateSnippet(p))).append("\"");
+                json.append("}");
             }
+            
+            json.append("]}");
+            sendJson(ex, json.toString());
+            
+        } catch (Throwable t) {
+            StringWriter sw = new StringWriter();
+            t.printStackTrace(new PrintWriter(sw));
+            String errorMsg = sw.toString();
+            if (errorMsg.length() > 500) errorMsg = errorMsg.substring(0, 500);
+            String error = "{\"success\":false,\"error\":\"" + escapeJson(errorMsg) + "\"}";
+            sendJson(ex, error, 500);
         }
-        sb.append("</div>");
+    }
+
+    // ==================== 搜尋建議 API ====================
+    private static void handleSuggestionsAPI(HttpExchange ex) throws IOException {
+        setCorsHeaders(ex);
+        if ("OPTIONS".equals(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1);
+            return;
+        }
+
+        String query = getQueryParam(ex.getRequestURI(), "q");
+        if (query == null) query = "";
         
-        // 右側：側邊欄
-        sb.append("<div class=\"sidebar\">");
+        final String searchTerm = query.toLowerCase();
         
+        // 過濾匹配的建議
+        List<String> suggestions = SUGGESTION_KEYWORDS.stream()
+            .filter(kw -> kw.toLowerCase().contains(searchTerm))
+            .limit(8)
+            .collect(Collectors.toList());
+        
+        // 加入最近搜尋
+        List<String> recentMatches = recentSearches.stream()
+            .filter(s -> s.toLowerCase().contains(searchTerm))
+            .distinct()
+            .limit(3)
+            .collect(Collectors.toList());
+        
+        StringBuilder json = new StringBuilder();
+        json.append("{\"suggestions\":[");
+        
+        int count = 0;
+        // 先顯示最近搜尋
+        for (String recent : recentMatches) {
+            if (count > 0) json.append(",");
+            json.append("{\"text\":\"").append(escapeJson(recent)).append("\",\"type\":\"history\"}");
+            count++;
+        }
+        
+        // 再顯示建議關鍵字
+        for (String suggestion : suggestions) {
+            if (count >= 10) break;
+            if (recentMatches.contains(suggestion)) continue;
+            if (count > 0) json.append(",");
+            json.append("{\"text\":\"").append(escapeJson(suggestion)).append("\",\"type\":\"suggestion\"}");
+            count++;
+        }
+        
+        json.append("]}");
+        sendJson(ex, json.toString());
+    }
+
+    // ==================== 子網頁查詢 API ====================
+    private static void handleSubpagesAPI(HttpExchange ex) throws IOException {
+        setCorsHeaders(ex);
+        if ("OPTIONS".equals(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1);
+            return;
+        }
+
+        String domain = getQueryParam(ex.getRequestURI(), "domain");
+        String query = getQueryParam(ex.getRequestURI(), "query");
+        
+        if (domain == null || domain.isEmpty()) {
+            sendJson(ex, "{\"success\":false,\"error\":\"需要提供 domain 參數\"}");
+            return;
+        }
+
         Tree tree = SearchEngine.getLastSearchTree();
-        if (tree != null) {
-            sb.append("<div class=\"panel\">");
-            sb.append("<h3>📊 網站結構</h3>");
+        
+        StringBuilder json = new StringBuilder();
+        json.append("{");
+        
+        if (tree == null) {
+            json.append("\"success\":false,\"error\":\"請先進行搜尋\"");
+        } else {
+            List<PageNode> allPages = tree.getAllPagesSorted();
+            List<PageNode> domainPages = allPages.stream()
+                .filter(p -> p.getDomain().equalsIgnoreCase(domain))
+                .collect(Collectors.toList());
+            
+            json.append("\"success\":true,");
+            json.append("\"domain\":\"").append(escapeJson(domain)).append("\",");
+            json.append("\"count\":").append(domainPages.size()).append(",");
+            json.append("\"subpages\":[");
+            
+            for (int i = 0; i < domainPages.size(); i++) {
+                PageNode p = domainPages.get(i);
+                if (i > 0) json.append(",");
+                json.append("{");
+                json.append("\"title\":\"").append(escapeJson(p.getTitle())).append("\",");
+                json.append("\"url\":\"").append(escapeJson(p.getUrl())).append("\",");
+                json.append("\"score\":").append(String.format("%.2f", p.getScore())).append(",");
+                json.append("\"path\":\"").append(escapeJson(extractPath(p.getUrl()))).append("\"");
+                json.append("}");
+            }
+            
+            json.append("]");
+        }
+        
+        json.append("}");
+        sendJson(ex, json.toString());
+    }
+
+    // ==================== 搜尋歷史 API ====================
+    private static void handleHistoryAPI(HttpExchange ex) throws IOException {
+        setCorsHeaders(ex);
+        if ("OPTIONS".equals(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1);
+            return;
+        }
+
+        StringBuilder json = new StringBuilder();
+        json.append("{\"history\":[");
+        
+        List<String> recent = new ArrayList<>(recentSearches);
+        Collections.reverse(recent);
+        
+        for (int i = 0; i < Math.min(10, recent.size()); i++) {
+            if (i > 0) json.append(",");
+            json.append("\"").append(escapeJson(recent.get(i))).append("\"");
+        }
+        
+        json.append("]}");
+        sendJson(ex, json.toString());
+    }
+
+    // ==================== 樹狀結構 API ====================
+    private static void handleTreeAPI(HttpExchange ex) throws IOException {
+        setCorsHeaders(ex);
+        if ("OPTIONS".equals(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1);
+            return;
+        }
+
+        Tree tree = SearchEngine.getLastSearchTree();
+        StringBuilder json = new StringBuilder();
+        json.append("{");
+        
+        if (tree == null) {
+            json.append("\"success\":false,\"error\":\"請先進行搜尋\"");
+        } else {
+            json.append("\"success\":true,\"domains\":[");
+            
             List<PageNode> pages = tree.getAllPagesSorted();
             Map<String, List<PageNode>> byDomain = new LinkedHashMap<>();
             for (PageNode p : pages) {
                 byDomain.computeIfAbsent(p.getDomain(), k -> new ArrayList<>()).add(p);
             }
+            
+            int idx = 0;
             for (Map.Entry<String, List<PageNode>> entry : byDomain.entrySet()) {
+                if (idx++ > 0) json.append(",");
                 double total = entry.getValue().stream().mapToDouble(PageNode::getScore).sum();
-                sb.append("<div class=\"tree-item\"><strong style=\"color:#fff\">" + escapeHtml(entry.getKey()) + "</strong> (" + String.format("%.1f", total) + ")</div>");
+                json.append("{\"domain\":\"").append(escapeJson(entry.getKey())).append("\",");
+                json.append("\"totalScore\":").append(String.format("%.2f", total)).append(",");
+                json.append("\"pageCount\":").append(entry.getValue().size()).append("}");
             }
-            sb.append("</div>");
-            
-            sb.append("<div class=\"panel\">");
-            sb.append("<h3>🧠 語意分析</h3>");
-            List<String> extracted = SemanticAnalyzer.extractRelatedKeywords(pages);
-            sb.append("<div style=\"font-size:12px;margin-bottom:8px;color:#888\">提取的關鍵字:</div>");
-            sb.append("<ul>");
-            for (String kw : extracted) {
-                sb.append("<li>" + escapeHtml(kw) + "</li>");
-            }
-            sb.append("</ul>");
-            
-            List<String> suggested = SemanticAnalyzer.suggestNewKeywords(extracted);
-            if (!suggested.isEmpty()) {
-                sb.append("<div style=\"font-size:12px;margin:8px 0;color:#888\">建議關鍵字:</div>");
-                sb.append("<ul>");
-                int count = 0;
-                for (String kw : suggested) {
-                    sb.append("<li>" + escapeHtml(kw) + "</li>");
-                    if (++count >= 5) break;
-                }
-                sb.append("</ul>");
-            }
-            sb.append("</div>");
+            json.append("]");
         }
         
-        sb.append("</div>");
-        sb.append("</div>");
-        sb.append("</div></body></html>");
-        sendHtml(ex, sb.toString());
+        json.append("}");
+        sendJson(ex, json.toString());
     }
 
-    private static void handleTree(HttpExchange ex) throws IOException {
-        Tree tree = SearchEngine.getLastSearchTree();
-        
-        StringBuilder sb = new StringBuilder();
-        sb.append("<!doctype html><html><head><meta charset=\"utf-8\"><title>樹狀結構</title>");
-        sb.append("<style>body{font-family:monospace;background:#0f0f0f;color:#fff;padding:24px}.container{max-width:900px;margin:0 auto}pre{background:rgba(255,255,255,0.05);padding:16px;border-radius:8px;overflow-x:auto}.btn{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);padding:8px 16px;border-radius:4px;cursor:pointer;text-decoration:none;color:#fff}</style>");
-        sb.append("</head><body><div class=\"container\">");
-        sb.append("<h2>📊 網站樹狀結構</h2>");
-        sb.append("<div style=\"margin:20px 0\"><a href=\"/\" class=\"btn\">← 返回搜尋</a></div>");
-        
-        if (tree == null) {
-            sb.append("<p>請先進行搜尋</p>");
-        } else {
-            sb.append("<pre>" + escapeHtml(tree.getTreeDisplay()) + "</pre>");
+    // ==================== 語意分析 API ====================
+    private static void handleSemanticAPI(HttpExchange ex) throws IOException {
+        setCorsHeaders(ex);
+        if ("OPTIONS".equals(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1);
+            return;
         }
-        
-        sb.append("</div></body></html>");
-        sendHtml(ex, sb.toString());
-    }
 
-    private static void handleSemantic(HttpExchange ex) throws IOException {
         Tree tree = SearchEngine.getLastSearchTree();
-        
-        StringBuilder sb = new StringBuilder();
-        sb.append("<!doctype html><html><head><meta charset=\"utf-8\"><title>語意分析</title>");
-        sb.append("<style>body{font-family:sans-serif;background:#0f0f0f;color:#fff;padding:24px}.container{max-width:900px;margin:0 auto}pre{background:rgba(255,255,255,0.05);padding:16px;border-radius:8px;overflow-x:auto}.btn{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);padding:8px 16px;border-radius:4px;cursor:pointer;text-decoration:none;color:#fff}</style>");
-        sb.append("</head><body><div class=\"container\">");
-        sb.append("<h2>🧠 語意分析</h2>");
-        sb.append("<div style=\"margin:20px 0\"><a href=\"/\" class=\"btn\">← 返回搜尋</a></div>");
+        StringBuilder json = new StringBuilder();
+        json.append("{");
         
         if (tree == null) {
-            sb.append("<p>請先進行搜尋</p>");
+            json.append("\"success\":false,\"error\":\"請先進行搜尋\"");
         } else {
             List<PageNode> pages = tree.getAllPagesSorted();
-            String report = SemanticAnalyzer.getAnalysisReport(pages, "上次搜尋");
-            sb.append("<pre>" + escapeHtml(report) + "</pre>");
+            List<String> extracted = SemanticAnalyzer.extractRelatedKeywords(pages);
+            List<String> suggested = SemanticAnalyzer.suggestNewKeywords(extracted);
+            
+            json.append("\"success\":true,\"extractedKeywords\":[");
+            for (int i = 0; i < extracted.size(); i++) {
+                if (i > 0) json.append(",");
+                json.append("\"").append(escapeJson(extracted.get(i))).append("\"");
+            }
+            json.append("],\"suggestedKeywords\":[");
+            int count = 0;
+            for (String kw : suggested) {
+                if (count > 0) json.append(",");
+                json.append("\"").append(escapeJson(kw)).append("\"");
+                if (++count >= 10) break;
+            }
+            json.append("]");
         }
         
-        sb.append("</div></body></html>");
-        sendHtml(ex, sb.toString());
+        json.append("}");
+        sendJson(ex, json.toString());
+    }
+
+    // ==================== 分類 API ====================
+    private static void handleCategoriesAPI(HttpExchange ex) throws IOException {
+        setCorsHeaders(ex);
+        if ("OPTIONS".equals(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1);
+            return;
+        }
+
+        String json = "{\"categories\":[" +
+            "{\"id\":\"music\",\"name\":\"音樂\",\"icon\":\"🎵\",\"query\":\"音樂 演唱會\",\"color\":\"#ff6b6b\"}," +
+            "{\"id\":\"art\",\"name\":\"展覽\",\"icon\":\"🎨\",\"query\":\"展覽 藝術\",\"color\":\"#4ecdc4\"}," +
+            "{\"id\":\"market\",\"name\":\"市集\",\"icon\":\"🛍️\",\"query\":\"市集 文創\",\"color\":\"#ffe66d\"}," +
+            "{\"id\":\"outdoor\",\"name\":\"戶外\",\"icon\":\"⛺\",\"query\":\"戶外 露營\",\"color\":\"#95e1d3\"}," +
+            "{\"id\":\"family\",\"name\":\"親子\",\"icon\":\"👨‍👩‍👧\",\"query\":\"親子 兒童\",\"color\":\"#f38181\"}," +
+            "{\"id\":\"sports\",\"name\":\"運動\",\"icon\":\"⚽\",\"query\":\"運動 賽事\",\"color\":\"#aa96da\"}," +
+            "{\"id\":\"food\",\"name\":\"美食\",\"icon\":\"🍜\",\"query\":\"美食 節\",\"color\":\"#fcbad3\"}," +
+            "{\"id\":\"tech\",\"name\":\"科技\",\"icon\":\"💻\",\"query\":\"科技 展覽\",\"color\":\"#a8d8ea\"}" +
+            "]}";
+        sendJson(ex, json);
+    }
+
+    // ==================== 靜態檔案 ====================
+    private static void handleStatic(HttpExchange ex) throws IOException {
+        String path = ex.getRequestURI().getPath();
+        if (path.equals("/")) path = "/index.html";
+        
+        Path filePath = Paths.get(FRONTEND_DIR + path);
+        if (!Files.exists(filePath)) {
+            filePath = Paths.get(FRONTEND_DIR + "/index.html");
+        }
+        
+        if (Files.exists(filePath)) {
+            byte[] bytes = Files.readAllBytes(filePath);
+            Headers h = ex.getResponseHeaders();
+            h.set("Content-Type", getContentType(path));
+            ex.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = ex.getResponseBody()) { os.write(bytes); }
+        } else {
+            String html = "<!DOCTYPE html><html><head><meta charset='utf-8'></head>" +
+                "<body style='font-family:system-ui;padding:40px;background:#0a0a0f;color:#fff;text-align:center'>" +
+                "<h1>🎪 EventFinder API</h1>" +
+                "<p style='color:#888'>後端已啟動！請啟動 React 前端：</p>" +
+                "<pre style='background:#1a1a2e;padding:20px;border-radius:8px;text-align:left;display:inline-block'>" +
+                "cd frontend\nnpm install\nnpm run dev</pre>" +
+                "<p style='color:#888;margin-top:20px'>然後訪問 <a href='http://localhost:3000' style='color:#ff6b6b'>http://localhost:3000</a></p>" +
+                "</body></html>";
+            sendHtml(ex, html);
+        }
+    }
+
+    // ==================== 工具方法 ====================
+    
+    private static void addToHistory(String query) {
+        recentSearches.removeIf(s -> s.equalsIgnoreCase(query));
+        recentSearches.add(query);
+        while (recentSearches.size() > 50) {
+            recentSearches.remove(0);
+        }
+    }
+    
+    private static String generateSnippet(PageNode p) {
+        String title = p.getTitle() != null ? p.getTitle() : "";
+        String city = p.getCity() != null ? p.getCity() : "";
+        String domain = p.getDomain() != null ? p.getDomain() : "";
+        return String.format("在 %s 舉辦的活動，來源：%s", city.isEmpty() ? "台灣" : city, domain);
+    }
+    
+    private static String extractPath(String url) {
+        try {
+            URI uri = new URI(url);
+            String path = uri.getPath();
+            return path != null && !path.isEmpty() ? path : "/";
+        } catch (Exception e) {
+            return "/";
+        }
+    }
+
+    private static void setCorsHeaders(HttpExchange ex) {
+        Headers h = ex.getResponseHeaders();
+        h.set("Access-Control-Allow-Origin", "*");
+        h.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        h.set("Access-Control-Allow-Headers", "Content-Type");
     }
 
     private static String getQueryParam(URI uri, String name) {
@@ -373,7 +466,20 @@ public class SimpleServer {
     }
 
     private static String urlDecode(String s) {
-        try { return URLDecoder.decode(s, StandardCharsets.UTF_8.name()); } catch (Exception e) { return s; }
+        try { return URLDecoder.decode(s, StandardCharsets.UTF_8.name()); } 
+        catch (Exception e) { return s; }
+    }
+
+    private static void sendJson(HttpExchange ex, String json) throws IOException {
+        sendJson(ex, json, 200);
+    }
+
+    private static void sendJson(HttpExchange ex, String json, int code) throws IOException {
+        byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+        Headers h = ex.getResponseHeaders();
+        h.set("Content-Type", "application/json; charset=utf-8");
+        ex.sendResponseHeaders(code, bytes.length);
+        try (OutputStream os = ex.getResponseBody()) { os.write(bytes); }
     }
 
     private static void sendHtml(HttpExchange ex, String html) throws IOException {
@@ -384,12 +490,23 @@ public class SimpleServer {
         try (OutputStream os = ex.getResponseBody()) { os.write(bytes); }
     }
 
-    private static String escapeHtml(String s) {
+    private static String escapeJson(String s) {
         if (s == null) return "";
-        return s.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;");
+        return s.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
     }
 
-    private static void handleStatic(HttpExchange ex) throws IOException {
-        ex.sendResponseHeaders(404, -1);
+    private static String getContentType(String path) {
+        if (path.endsWith(".html")) return "text/html; charset=utf-8";
+        if (path.endsWith(".css")) return "text/css; charset=utf-8";
+        if (path.endsWith(".js")) return "application/javascript; charset=utf-8";
+        if (path.endsWith(".json")) return "application/json; charset=utf-8";
+        if (path.endsWith(".png")) return "image/png";
+        if (path.endsWith(".svg")) return "image/svg+xml";
+        if (path.endsWith(".ico")) return "image/x-icon";
+        return "text/plain; charset=utf-8";
     }
 }
