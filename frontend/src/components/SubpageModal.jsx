@@ -1,8 +1,8 @@
 import React from 'react';
 
-export default function SubpageModal({ domain, data, onClose }) {
+export default function SubpageModal({ domain, data, onClose, T }) {
   if (!data) return null;
-
+  
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal animate-scale-in" onClick={e => e.stopPropagation()}>
@@ -10,21 +10,13 @@ export default function SubpageModal({ domain, data, onClose }) {
           <h2>🌐 {domain}</h2>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
-        
         <div className="modal-body">
           <p className="modal-info">
-            找到 <strong>{data.count}</strong> 個相關頁面
+            {T('foundPages').replace('{count}', data.count)}
           </p>
-          
           <div className="subpage-list">
             {data.subpages && data.subpages.map((page, i) => (
-              <a 
-                key={i}
-                href={page.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="subpage-item"
-              >
+              <a key={i} href={page.url} target="_blank" rel="noopener noreferrer" className="subpage-item">
                 <div className="subpage-title">{page.title}</div>
                 <div className="subpage-meta">
                   <span className="subpage-path">{page.path}</span>
@@ -34,9 +26,8 @@ export default function SubpageModal({ domain, data, onClose }) {
             ))}
           </div>
         </div>
-        
         <div className="modal-footer">
-          <button className="btn-secondary" onClick={onClose}>關閉</button>
+          <button className="btn-secondary" onClick={onClose}>{T('close')}</button>
         </div>
       </div>
     </div>
