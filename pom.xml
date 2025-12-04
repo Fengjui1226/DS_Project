@@ -16,6 +16,13 @@
         <relativePath/>
     </parent>
 
+    <!-- Properties -->
+    <properties>
+        <!-- Set Java compilation target to Java 17 -->
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+    </properties>
+
     <!-- Dependencies -->
     <dependencies>
         <!-- Spring Boot Web Starter -->
@@ -58,6 +65,10 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <!-- 指定唯一的 main 類別，避免 repackage 時出現多個 main 的錯誤 -->
+                    <mainClass>app.web.SimpleServer</mainClass>
+                </configuration>
             </plugin>
         </plugins>
     </build>
