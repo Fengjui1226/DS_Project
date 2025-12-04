@@ -1,156 +1,167 @@
 package app.bl;
 
 import java.time.LocalDate;
-import java.time.temporal.ChronoUnit;
 import java.util.*;
 
 /**
- * 代表一個活動頁面（文件）。
+ * PageNode - 網頁節點（支援子網頁）
+ * 
+ * 改進：
+ * - 儲存子網頁列表
+ * - 計算總分 = 自身分數 + Σ子網頁分數
  */
 public class PageNode {
-
-    private final String url;
-    private final String title;
-    private final Map<Keyword, Integer> tf;
-    private double score = 0.0;
-
-    private LocalDate eventDate;
-    private String city;
+    
+    private String url;
+    private String title;
     private String domain;
-    private List<String> tokens = List.of();
+    private String city;
+    private LocalDate eventDate;
+    private Map<Keyword, Integer> tf;
+    private List<String> tokens;
+    
+    // 分數相關
+    private double score = 0.0;           // 自身分數
+    private double subPagesScore = 0.0;   // 子網頁分數總和
+    private double totalScore = 0.0;      // 總分 = 自身 + 子網頁
+    
+    // 子網頁
+    private List<SubPageNode> subPages = new ArrayList<>();
+    private boolean crawled = false;      // 是否已爬取子網頁
+    
+    // 內容（從爬蟲取得）
+    private String textContent = "";
 
-    private PageNode(String url, String title, Map<Keyword, Integer> tf) {
-        this.url = Objects.requireNonNull(url, "url");
-        this.title = Objects.requireNonNull(title, "title");
-        this.tf = new HashMap<>(Objects.requireNonNull(tf, "tf"));
-    }
-
-    public static PageNode of(String url, String title, Map<Keyword, Integer> tf) {
-        return new PageNode(url, title, tf);
-    }
-
-    public static PageNode of(String url, String title,
-                              Map<Keyword, Integer> tf,
-                              LocalDate eventDate,
-                              String city,
-                              String domain,
-                              List<String> tokens) {
-        PageNode p = new PageNode(url, title, tf);
-        p.eventDate = eventDate;
-        p.city = (city == null) ? "" : city;
-        p.domain = (domain == null) ? "" : domain.toLowerCase(Locale.ROOT);
-        p.tokens = (tokens == null) ? List.of() : List.copyOf(tokens);
+    // ============ 建構子 ============
+    
+    private PageNode() {}
+    
+    public static PageNode of(String url, String title, Map<Keyword, Integer> tf,
+                              LocalDate date, String city, String domain, List<String> tokens) {
+        PageNode p = new PageNode();
+        p.url = url;
+        p.title = title;
+        p.tf = tf != null ? tf : new HashMap<>();
+        p.eventDate = date;
+        p.city = city;
+        p.domain = domain;
+        p.tokens = tokens != null ? tokens : new ArrayList<>();
         return p;
     }
-
-    // Getters / Setters
-    public Map<Keyword, Integer> tf() { return Collections.unmodifiableMap(tf); }
-    public String getUrl() { return url; }
-    public String getTitle() { return title; }
-    public double getScore() { return score; }
-    public void setScore(double s) { this.score = s; }
-    public LocalDate getEventDate() { return eventDate; }
-    public String getCity() { return city; }
-    public String getDomain() { return domain; }
-    public List<String> getTokens() { return tokens; }
-
-    public void setEventDate(LocalDate d) { this.eventDate = d; }
-    public void setCity(String c) { this.city = (c == null) ? "" : c; }
-    public void setDomain(String d) { this.domain = (d == null) ? "" : d.toLowerCase(Locale.ROOT); }
-    public void setTokens(List<String> tok) { this.tokens = (tok == null) ? List.of() : List.copyOf(tok); }
-
-    public void bumpTf(Keyword k, int delta) {
-        if (k == null || delta == 0) return;
-        tf.put(k, tf.getOrDefault(k, 0) + delta);
-    }
-
+    
+    // ============ 子網頁相關 ============
+    
     /**
-     * Freshness score: e^(-days/7)
+     * 新增子網頁
      */
-    public double calculateFreshness() {
-        if (eventDate == null) return 0.5;
-        
-        LocalDate today = LocalDate.now();
-        long daysUntilEvent = ChronoUnit.DAYS.between(today, eventDate);
-        
-        if (daysUntilEvent < 0) {
-            return Math.exp(daysUntilEvent / 7.0) * 0.3;
-        }
-        return Math.exp(-daysUntilEvent / 7.0);
+    public void addSubPage(SubPageNode subPage) {
+        this.subPages.add(subPage);
     }
     
     /**
-     * Proximity bonus for keywords appearing close together
+     * 取得所有子網頁
+     */
+    public List<SubPageNode> getSubPages() {
+        return subPages;
+    }
+    
+    /**
+     * 計算子網頁分數總和
+     */
+    public void calculateSubPagesScore() {
+        this.subPagesScore = 0.0;
+        for (SubPageNode sub : subPages) {
+            this.subPagesScore += sub.getScore();
+        }
+    }
+    
+    /**
+     * 計算總分 = 自身分數 + 子網頁分數（加權）
+     * 
+     * 子網頁分數權重較低（0.3），因為主要還是看大網頁
+     */
+    public void calculateTotalScore() {
+        this.totalScore = this.score + (this.subPagesScore * 0.3);
+    }
+    
+    /**
+     * 取得總分
+     */
+    public double getTotalScore() {
+        return totalScore;
+    }
+    
+    // ============ 分數計算輔助 ============
+    
+    /**
+     * 計算關鍵字接近度獎勵
      */
     public double calculateProximityBonus(List<String> queryTokens) {
         if (queryTokens == null || queryTokens.size() < 2) return 1.0;
         
-        String titleLower = title.toLowerCase(Locale.ROOT);
+        String content = (title + " " + textContent).toLowerCase();
         double bonus = 1.0;
         
+        // 檢查關鍵字是否相鄰出現
         for (int i = 0; i < queryTokens.size() - 1; i++) {
-            String word1 = queryTokens.get(i).toLowerCase();
-            String word2 = queryTokens.get(i + 1).toLowerCase();
+            String t1 = queryTokens.get(i).toLowerCase();
+            String t2 = queryTokens.get(i + 1).toLowerCase();
             
-            int pos1 = titleLower.indexOf(word1);
-            int pos2 = titleLower.indexOf(word2);
-            
-            if (pos1 >= 0 && pos2 >= 0) {
-                int distance = Math.abs(pos2 - pos1 - word1.length());
-                
-                if (distance <= 0) bonus += 3.0;
-                else if (distance <= 3) bonus += 2.5;
-                else if (distance <= 5) bonus += 2.0;
-                else if (distance <= 10) bonus += 1.5;
-                else bonus += 1.0;
+            // 相鄰出現
+            if (content.contains(t1 + t2) || content.contains(t1 + " " + t2)) {
+                bonus += 0.2;
             }
         }
-        return Math.min(bonus, 5.0);
+        
+        return Math.min(bonus, 2.0);  // 最多 2 倍
     }
     
-   /**
-     * Region boost based on user location
+    // ============ Getters & Setters ============
+    
+    public String getUrl() { return url; }
+    public void setUrl(String url) { this.url = url; }
+    
+    public String getTitle() { return title; }
+    public void setTitle(String title) { this.title = title; }
+    
+    public String getDomain() { return domain; }
+    public void setDomain(String domain) { this.domain = domain; }
+    
+    public String getCity() { return city; }
+    public void setCity(String city) { this.city = city; }
+    
+    public LocalDate getEventDate() { return eventDate; }
+    public void setEventDate(LocalDate eventDate) { this.eventDate = eventDate; }
+    
+    public Map<Keyword, Integer> tf() { return tf; }
+    public Map<Keyword, Integer> getTf() { return tf; }
+    public void setTf(Map<Keyword, Integer> tf) { this.tf = tf; }
+    
+    public List<String> getTokens() { return tokens; }
+    public void setTokens(List<String> tokens) { this.tokens = tokens; }
+    
+    public double getScore() { return score; }
+    public void setScore(double score) { this.score = score; }
+    
+    public double getSubPagesScore() { return subPagesScore; }
+    public void setSubPagesScore(double score) { this.subPagesScore = score; }
+    
+    public String getTextContent() { return textContent; }
+    public void setTextContent(String textContent) { this.textContent = textContent; }
+    
+    public boolean isCrawled() { return crawled; }
+    public void setCrawled(boolean crawled) { this.crawled = crawled; }
+    
+    /**
+     * 取得子網頁數量
      */
-    public double calculateRegionBoost(String userCity) {
-        if (userCity == null || userCity.isEmpty()) return 1.0;
-        
-        // 沒有城市資訊的活動降低分數
-        if (city == null || city.isEmpty()) return 0.5;
-        
-        // 同城市 2 倍
-        if (city.equals(userCity)) return 2.0;
-        
-        // 擴展鄰近城市關係
-        Map<String, List<String>> nearby = Map.ofEntries(
-            Map.entry("台北", List.of("新北", "基隆", "桃園", "宜蘭")),
-            Map.entry("新北", List.of("台北", "基隆", "桃園", "宜蘭")),
-            Map.entry("桃園", List.of("台北", "新北", "新竹", "苗栗")),
-            Map.entry("新竹", List.of("桃園", "苗栗", "台北")),
-            Map.entry("苗栗", List.of("新竹", "台中", "桃園")),
-            Map.entry("台中", List.of("彰化", "南投", "苗栗", "雲林")),
-            Map.entry("彰化", List.of("台中", "南投", "雲林")),
-            Map.entry("南投", List.of("台中", "彰化", "雲林", "嘉義")),
-            Map.entry("雲林", List.of("彰化", "嘉義", "台中")),
-            Map.entry("嘉義", List.of("雲林", "台南", "南投")),
-            Map.entry("台南", List.of("嘉義", "高雄")),
-            Map.entry("高雄", List.of("台南", "屏東")),
-            Map.entry("屏東", List.of("高雄", "台東")),
-            Map.entry("宜蘭", List.of("台北", "新北", "花蓮")),
-            Map.entry("花蓮", List.of("宜蘭", "台東")),
-            Map.entry("台東", List.of("花蓮", "屏東")),
-            Map.entry("基隆", List.of("台北", "新北"))
-        );
-        
-        // 鄰近城市 1.5 倍
-        if (nearby.getOrDefault(userCity, List.of()).contains(city)) return 1.5;
-        
-        // 非本地活動 0.8 倍
-        return 0.8;
+    public int getSubPageCount() {
+        return subPages.size();
     }
-
-    @Override 
+    
+    @Override
     public String toString() {
-        String displayUrl = "🌐 官方網站（點我）";
-        return title + " | " + displayUrl + " | " + (city == null ? "" : city);
+        return String.format("PageNode[%.1f (self) + %.1f (sub) = %.1f]: %s (%d subpages)", 
+            score, subPagesScore, totalScore, title, subPages.size());
     }
 }
