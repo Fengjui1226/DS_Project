@@ -3,6 +3,7 @@ package app.bl;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -389,25 +390,51 @@ private static final Map<String, List<String>> SEMANTIC_GROUPS = Map.ofEntries(
     return q;
 }
     /**
-     * 把查詢字串拆成 token 清單
-     */
+ * 解析查詢字串為 tokens，並做語義展開：
+ * - 原始拆字：空白、標點
+ * - 再依照 SEMANTIC_GROUPS，把同一概念的相關詞一起加進 tokens
+ */
     private static List<String> parseQueryTokens(String query) {
         List<String> tokens = new ArrayList<>();
-        if (query == null) return tokens;
+        if (query == null || query.isBlank()) {
+            return tokens;
+        }
 
-        String[] parts = query.trim().split("\\s+");
-        for (String part : parts) {
-            String p = part.trim();
-            if (!p.isEmpty()) {
-                tokens.add(p);
+        // 1. 先做基本斷詞（很簡單版：空白＋標點切）
+        String q = query.trim();
+        String[] raw = q.split("[\\s,，。.!！?？/]+");
+        for (String r : raw) {
+            String t = r.trim();
+            if (!t.isEmpty()) {
+                tokens.add(t);
             }
         }
-        return tokens;
-    }
 
-    /**
-     * 要不要排除這個結果（目前只排除噪音性質網站）
-     */
+        // 2. 語義展開：如果 query 裡有某個概念，就把那一整組相關詞塞進來
+        //    用 LinkedHashSet 去掉重複，保留原本順序
+        Set<String> expanded = new LinkedHashSet<>(tokens);
+        String lowerQuery = q.toLowerCase();
+
+        for (Map.Entry<String, List<String>> entry : SEMANTIC_GROUPS.entrySet()) {
+            String key = entry.getKey();
+            List<String> groupWords = entry.getValue();
+
+            // 如果查詢裡包含這個概念（市集／展覽／音樂…）
+            boolean hit = false;
+            for (String w : groupWords) {
+                if (lowerQuery.contains(w.toLowerCase())) {
+                    hit = true;
+                    break;
+                }
+            }
+
+            if (hit) {
+                expanded.addAll(groupWords);
+            }
+        }
+
+        return new ArrayList<>(expanded);
+    }
     private static boolean shouldExclude(String title, String url) {
         if (url == null) return false;
 
