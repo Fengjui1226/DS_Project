@@ -3,7 +3,6 @@ package app.bl;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -18,8 +17,8 @@ import java.util.regex.Pattern;
 import app.bl.WebCrawler.CrawlResult;
 import app.bl.WebCrawler.SiteResult;
 import app.da.GoogleConnector;
+import app.da.HTMLHandler;
 import app.da.LocationRecognizer;
-
 /**
  * SearchEngine v3.0 - 最終優化版
  * 
@@ -40,6 +39,14 @@ public class SearchEngine {
         "活動", "展覽", "音樂", "演唱會", "市集", "節慶",
         "festival", "concert", "exhibition", "event",
         "表演", "藝術", "體驗", "親子", "戶外", "講座"
+    );
+    // 活動類別擴充，例如「市集」→「文創市集、手作市集…」
+    private static final Map<String, List<String>> CATEGORY_EXPANSIONS = Map.ofEntries(
+        Map.entry("市集", List.of("文創市集", "手作市集", "假日市集", "聖誕市集", "週末市集")),
+        Map.entry("展覽", List.of("藝術展", "美術展", "攝影展", "設計展")),
+        Map.entry("音樂", List.of("音樂會", "音樂節", "樂團演出", "live house")),
+        Map.entry("演唱會", List.of("演唱會", "音樂會", "巡迴演唱會")),
+        Map.entry("市集 festival", List.of("market", "festival", "fair"))
     );
 
     // ★ 新增：活動類型擴充字典
@@ -151,45 +158,47 @@ public class SearchEngine {
             if (page == null) continue;
 
             if (ENABLE_CRAWLING) {
-                crawlPageAndSubpages(page, queryTokens, today);
+                crawlPageAndSubpages(page, queryTokens);
             }
 
             pages.add(page);
         }
         System.out.println("[Crawl] 完成爬取 " + pages.size() + " 個網站");
 
-        // 7. 分離過期與未過期
+        // 6. 先依日期把結果拆成「未過期 / 無日期」與「已過期」
         List<PageNode> validPages = new ArrayList<>();
         List<PageNode> expiredPages = new ArrayList<>();
 
         for (PageNode p : pages) {
             LocalDate d = p.getEventDate();
             if (d != null && d.isBefore(today)) {
-                expiredPages.add(p);
+                expiredPages.add(p);        // 明確早於今天 → 已過期
             } else {
-                validPages.add(p);
+                validPages.add(p);          // 未來 / 今天 / 無日期
             }
         }
 
+        // 如果有未過期/無日期的結果，就只對這些做 ranking；
+        // 如果一個都沒有（超冷門關鍵字），才退而求其次用全部 pages。
         List<PageNode> pagesToRank = validPages.isEmpty() ? pages : validPages;
 
         System.out.printf("[Filter] 未過期或無日期: %d, 已過期: %d%n",
                 pagesToRank.size(), expiredPages.size());
 
-        // 8. 計算 ranking 分數（傳入原始查詢）
+        // 7. 計算 ranking 分數（只算 pagesToRank）
         System.out.println("\n[Step 3] 計算分數...");
-        RankCalculator.rank(pagesToRank, user, originalQuery);
+        RankCalculator.rank(pagesToRank, user);
 
-        // 9. 建立樹狀結構
+        // 8. 建立樹狀結構
         Tree tree = new Tree();
         tree.addPages(pagesToRank);
         lastSearchTree = tree;
         lastResults = pagesToRank;
 
         long duration = System.currentTimeMillis() - startTime;
-        System.out.println("\n╔══════════════════════════════════════════╗");
-        System.out.printf("║  ✅ 完成！%d ms，%d 個結果                ║%n", duration, pagesToRank.size());
-        System.out.println("╚══════════════════════════════════════════╝");
+        System.out.println("\n========== 搜尋完成 ==========");
+        System.out.println("[Time] " + duration + " ms");
+        System.out.println("[Results] " + pagesToRank.size() + " 個網站");
 
         printResultsSummary(pagesToRank);
 
@@ -217,31 +226,55 @@ public class SearchEngine {
         return result.toString();
     }
 
-    /**
-     * 爬取頁面內容和子網頁（含內文日期提取）
-     */
-    private static void crawlPageAndSubpages(PageNode page, List<String> queryTokens, LocalDate today) {
+    private static void crawlPageAndSubpages(PageNode page, List<String> queryTokens) {
         ExecutorService executor = Executors.newSingleThreadExecutor();
 
         try {
             Future<?> future = executor.submit(() -> {
                 try {
+                    // 1. 爬取網站（包含子網頁）
                     SiteResult site = WebCrawler.crawlSite(page.getUrl());
 
                     if (site.getMainPage() != null && site.getMainPage().isSuccess()) {
-                        String mainText = site.getMainPage().getTextContent();
-                        page.setTextContent(mainText);
+                        CrawlResult main = site.getMainPage();
+
+                        // 1-1. 主頁內文
+                        page.setTextContent(main.getTextContent());
                         page.setCrawled(true);
 
-                        // ★ 內文再抓一次日期
-                        try {
-                            LocalDate contentDate = extractDateFromContent(mainText, today);
-                            if (page.getEventDate() == null && contentDate != null) {
-                                page.setEventDate(contentDate);
+                        // 1-2. 用 HTMLHandler 從 HTML 裡抓活動日期 & 城市
+                        String html = main.getHtml();
+                        if (html != null && !html.isEmpty()) {
+                            // 補活動日期（如果原本沒有）
+                            LocalDate dateFromHtml = HTMLHandler.extractDate(html);
+                            if (page.getEventDate() == null && dateFromHtml != null) {
+                                page.setEventDate(dateFromHtml);
                             }
-                        } catch (Exception ignore) {}
 
-                        // 處理子網頁
+                            // 補城市（如果原本沒有）
+                            if (page.getCity() == null || page.getCity().isEmpty()) {
+                                String cityFromHtml = HTMLHandler.extractCity(html);
+                                if (cityFromHtml != null && !cityFromHtml.isEmpty()) {
+                                    page.setCity(cityFromHtml);
+                                }
+                            }
+                        }
+
+                        // 1-3. 從內文再抓一些活動相關關鍵字塞回 TF
+                        List<String> extractedKeywords =
+                            HTMLHandler.extractKeywords(main.getTextContent());
+
+                        Map<Keyword, Integer> tf = page.getTf();
+                        if (tf == null) {
+                            tf = new HashMap<>();
+                            page.setTf(tf);
+                        }
+                        for (String kw : extractedKeywords) {
+                            Keyword k = Keyword.of(kw);
+                            tf.put(k, tf.getOrDefault(k, 0) + 1);
+                        }
+
+                        // 2. 處理子網頁
                         for (CrawlResult subResult : site.getSubPages()) {
                             SubPageNode subPage = new SubPageNode(
                                 subResult.getUrl(),
@@ -249,7 +282,10 @@ public class SearchEngine {
                                 subResult.getTextContent(),
                                 page.getUrl()
                             );
+
+                            // 計算子網頁的 TF
                             subPage.calculateTF(queryTokens);
+
                             page.addSubPage(subPage);
                         }
                     }
@@ -258,17 +294,17 @@ public class SearchEngine {
                 }
             });
 
-            future.get(8, TimeUnit.SECONDS);  // 縮短超時時間
+            // 等待最多 10 秒
+            future.get(10, TimeUnit.SECONDS);
 
         } catch (TimeoutException e) {
-            System.out.println("[Crawl Timeout] " + truncate(page.getUrl(), 50));
+            System.out.println("[Crawl Timeout] " + page.getUrl());
         } catch (Exception e) {
-            // 忽略
+            System.out.println("[Crawl Error] " + page.getUrl() + " - " + e.getMessage());
         } finally {
             executor.shutdownNow();
         }
     }
-
     /**
      * 建立 PageNode
      */
@@ -315,33 +351,38 @@ public class SearchEngine {
      * 優化查詢字串
      */
     private static String refineQuery(String query) {
-        if (query == null) return "";
-        String q = query.trim();
+        String q = query == null ? "" : query.trim();
+        if (q.isEmpty()) return q;
+
         String lower = q.toLowerCase();
 
-        // 沒有活動詞就補「活動」
-        boolean hasEventWord = false;
-        for (String term : EVENT_TERMS) {
-            if (lower.contains(term.toLowerCase())) {
-                hasEventWord = true;
-                break;
-            }
-        }
-        if (!hasEventWord) {
-            q = q + " 活動";
+        boolean hasCity = CITY_ALIASES.keySet().stream()
+            .anyMatch(alias -> lower.contains(alias.toLowerCase()));
+
+        boolean hasEventWord = EVENT_TERMS.stream()
+            .anyMatch(term -> lower.contains(term.toLowerCase()));
+
+        // 如果有城市但沒明講活動類型，幫忙加一點活動相關字
+        if (hasCity && !hasEventWord) {
+            q += " 活動 OR 展覽 OR 演唱會 OR 市集";
         }
 
-        // ★ 動態年份
-        int year = LocalDate.now().getYear();
-        q += " " + year + " OR " + (year + 1);
+        // 年份：如果使用者沒自己打 20xx，就加今年 + 明年
+        if (!lower.matches(".*20\\d{2}.*")) {
+            int year = LocalDate.now().getYear();
+            q += " " + year + " OR " + (year + 1);
+        }
 
-        // ★ 台灣限定
-        if (!lower.contains("台灣") && !lower.contains("taiwan")) {
+        // 加上台灣（避免跑去其他國家）
+        if (!lower.contains("台灣") && !lower.contains("臺灣")) {
             q += " 台灣";
         }
 
-        // 排除
-        q += " -申請辦法 -補助 -招標 -徵選";
+        // 加一點社群關鍵字（讓 IG / FB 活動有機會浮上來，但是不是用 site: 限制）
+        q += " IG instagram FB 粉絲專頁 活動頁";
+
+        // 排除比較常見的「非活動」關鍵字
+        q += " -申請辦法 -徵選 -補助 -招生 -履歷 -課程簡章";
 
         return q;
     }
@@ -351,40 +392,28 @@ public class SearchEngine {
      */
     private static List<String> parseQueryTokens(String query) {
         List<String> tokens = new ArrayList<>();
-        if (query == null || query.isBlank()) {
-            return tokens;
+        if (query == null || query.isEmpty()) return tokens;
+
+        // 先切基本字詞
+        for (String raw : query.split("\\s+")) {
+            String t = raw.trim();
+            if (t.isEmpty()) continue;
+            // 過濾掉 OR / AND / 符號
+            if ("OR".equalsIgnoreCase(t) || "AND".equalsIgnoreCase(t)) continue;
+            tokens.add(t);
         }
 
-        String q = query.trim();
-        String[] raw = q.split("[\\s,，。.!！?？/]+");
-        for (String r : raw) {
-            String t = r.trim();
-            if (!t.isEmpty() && t.length() >= 2) {
-                tokens.add(t);
+        // 針對活動類別做擴充
+        List<String> expanded = new ArrayList<>(tokens);
+        for (String t : tokens) {
+            String base = t.replaceAll("[\\p{Punct}]", ""); // 去標點
+            if (CATEGORY_EXPANSIONS.containsKey(base)) {
+                expanded.addAll(CATEGORY_EXPANSIONS.get(base));
             }
         }
 
-        // 語義展開
-        Set<String> expanded = new LinkedHashSet<>(tokens);
-        String lowerQuery = q.toLowerCase();
-
-        for (Map.Entry<String, List<String>> entry : SEMANTIC_GROUPS.entrySet()) {
-            List<String> groupWords = entry.getValue();
-            boolean hit = false;
-            for (String w : groupWords) {
-                if (lowerQuery.contains(w.toLowerCase())) {
-                    hit = true;
-                    break;
-                }
-            }
-            if (hit) {
-                expanded.addAll(groupWords);
-            }
-        }
-
-        return new ArrayList<>(expanded);
+        return expanded;
     }
-
     private static boolean shouldExclude(String title, String url) {
         if (url == null) return false;
         if (title != null && title.contains("Google Custom Search")) return true;
