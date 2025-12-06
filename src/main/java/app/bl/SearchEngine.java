@@ -15,36 +15,61 @@ import java.util.regex.*;
 import java.util.concurrent.*;
 
 /**
- * SearchEngine - 整合爬蟲版本
+ * SearchEngine - 高效能版本
  * 
- * 流程：
- * 1. Google 搜尋 → 取得大網頁 URL
- * 2. 爬蟲爬取每個大網頁 → 取得內容 + 子連結
- * 3. 爬取子網頁 → 取得子網頁內容
- * 4. 計算分數 → 大網頁分數 + Σ子網頁分數
- * 5. 排序顯示
+ * 優化重點：
+ * 1. 動態年份生成（不再硬編碼）
+ * 2. 並行爬蟲（共享 Thread Pool）
+ * 3. 更智慧的查詢優化
+ * 4. 更精準的活動過濾
  */
 public class SearchEngine {
 
-    // 設定
-    private static final int MAX_GOOGLE_RESULTS = 10;    // Google 回傳數量
-    private static final boolean ENABLE_CRAWLING = true; // 是否啟用爬蟲
+    // ============ 設定 ============
+    private static final int MAX_GOOGLE_RESULTS = 10;
+    private static final boolean ENABLE_CRAWLING = true;
+    private static final int CRAWL_PARALLELISM = 4;  // 並行爬蟲數
+    private static final int CRAWL_TIMEOUT_SECONDS = 12;  // 總爬蟲超時
     
-    // 活動相關關鍵字
-    private static final List<String> EVENT_TERMS = List.of(
-        "活動", "展覽", "音樂", "演唱會", "市集", "節慶",
-        "festival", "concert", "exhibition", "event",
-        "表演", "藝術", "體驗", "親子", "戶外", "講座"
+    // 共享的執行緒池（重複使用，效能提升）
+    private static final ExecutorService CRAWLER_POOL = Executors.newFixedThreadPool(
+        CRAWL_PARALLELISM,
+        r -> {
+            Thread t = new Thread(r, "Crawler-Pool");
+            t.setDaemon(true);
+            return t;
+        }
     );
     
-    // 城市別名
+    // 活動相關關鍵字（加權分類）
+    private static final Map<String, Double> EVENT_TERMS_WEIGHTED = Map.ofEntries(
+        // 高相關性
+        Map.entry("演唱會", 2.0), Map.entry("音樂節", 2.0), Map.entry("展覽", 1.8),
+        Map.entry("concert", 2.0), Map.entry("festival", 2.0), Map.entry("exhibition", 1.8),
+        // 中相關性
+        Map.entry("活動", 1.5), Map.entry("市集", 1.5), Map.entry("節慶", 1.5),
+        Map.entry("表演", 1.4), Map.entry("音樂會", 1.4), Map.entry("藝術", 1.3),
+        Map.entry("event", 1.5), Map.entry("market", 1.5),
+        // 一般相關性
+        Map.entry("體驗", 1.2), Map.entry("親子", 1.2), Map.entry("戶外", 1.2),
+        Map.entry("講座", 1.1), Map.entry("工作坊", 1.1)
+    );
+    
+    // 城市別名（含英文、簡體）
     private static final Map<String, String> CITY_ALIASES = Map.ofEntries(
         Map.entry("台北", "台北"), Map.entry("臺北", "台北"), Map.entry("taipei", "台北"),
-        Map.entry("新北", "新北"),
+        Map.entry("新北", "新北"), Map.entry("newtaipei", "新北"),
         Map.entry("台中", "台中"), Map.entry("臺中", "台中"), Map.entry("taichung", "台中"),
-        Map.entry("台南", "台南"), Map.entry("臺南", "台南"),
+        Map.entry("台南", "台南"), Map.entry("臺南", "台南"), Map.entry("tainan", "台南"),
         Map.entry("高雄", "高雄"), Map.entry("kaohsiung", "高雄"),
-        Map.entry("桃園", "桃園"), Map.entry("基隆", "基隆"), Map.entry("新竹", "新竹")
+        Map.entry("桃園", "桃園"), Map.entry("taoyuan", "桃園"),
+        Map.entry("基隆", "基隆"), Map.entry("新竹", "新竹"), Map.entry("hsinchu", "新竹")
+    );
+
+    // 排除關鍵字（這些通常不是活動頁面）
+    private static final Set<String> EXCLUDE_KEYWORDS = Set.of(
+        "申請辦法", "補助要點", "徵選辦法", "作業規定", "表格下載",
+        "法規查詢", "行政規則", "招標公告", "採購公告"
     );
 
     // 儲存最後結果
@@ -55,23 +80,18 @@ public class SearchEngine {
      * 主要搜尋方法
      */
     public static List<PageNode> search(String query, UserProfile user) throws Exception {
-        System.out.println("\n========== 開始搜尋 ==========");
+        System.out.println("\n╔══════════════════════════════════════════╗");
+        System.out.println("║       🔍 EventFinder 搜尋引擎 v2.0       ║");
+        System.out.println("╚══════════════════════════════════════════╝");
         System.out.println("[Query] " + query);
         
         long startTime = System.currentTimeMillis();
         
         // 1. 確保城市在查詢中
         String userCity = user.getUserCity();
-        if (userCity != null && !userCity.isEmpty()) {
-            String queryLower = query.toLowerCase();
-            boolean hasCity = CITY_ALIASES.keySet().stream()
-                .anyMatch(alias -> queryLower.contains(alias.toLowerCase()));
-            if (!hasCity) {
-                query = userCity + " " + query;
-            }
-        }
+        query = ensureCityInQuery(query, userCity);
         
-        // 2. 優化查詢
+        // 2. 優化查詢（動態年份）
         String refinedQuery = refineQuery(query);
         System.out.println("[Refined] " + refinedQuery);
 
@@ -84,96 +104,193 @@ public class SearchEngine {
         List<String> queryTokens = parseQueryTokens(query);
         System.out.println("[Tokens] " + queryTokens);
 
-        // 5. 建立 PageNode 並爬取
-        System.out.println("\n[Step 2] 爬取網頁內容...");
+        // 5. 建立 PageNode（先建立，不爬取）
+        System.out.println("\n[Step 2] 建立頁面節點...");
         List<PageNode> pages = new ArrayList<>();
         LocalDate today = LocalDate.now();
         
         for (GoogleConnector.Result r : googleResults) {
             if (r == null || r.title == null || r.link == null) continue;
             
-            // 建立 PageNode
             PageNode page = createPageNode(r, query, queryTokens, userCity, today);
-            if (page == null) continue;
-            
-            // 爬取網頁內容和子網頁
-            if (ENABLE_CRAWLING) {
-                crawlPageAndSubpages(page, queryTokens);
+            if (page != null) {
+                pages.add(page);
             }
-            
-            pages.add(page);
         }
         
-        System.out.println("[Crawl] 完成爬取 " + pages.size() + " 個網站");
+        System.out.println("[Created] " + pages.size() + " 個有效節點");
 
-        // 6. 計算分數
-        System.out.println("\n[Step 3] 計算分數...");
+        // 6. 並行爬取（效能優化核心）
+        if (ENABLE_CRAWLING && !pages.isEmpty()) {
+            System.out.println("\n[Step 3] 並行爬取網頁內容（" + CRAWL_PARALLELISM + " 執行緒）...");
+            parallelCrawl(pages, queryTokens);
+        }
+
+        // 7. 計算分數
+        System.out.println("\n[Step 4] 計算排名分數...");
         RankCalculator.rank(pages, user);
 
-        // 7. 建立樹結構
+        // 8. 建立樹結構
         Tree tree = new Tree();
         tree.addPages(pages);
         lastSearchTree = tree;
         lastResults = pages;
 
         long duration = System.currentTimeMillis() - startTime;
-        System.out.println("\n========== 搜尋完成 ==========");
-        System.out.println("[Time] " + duration + " ms");
-        System.out.println("[Results] " + pages.size() + " 個網站");
+        System.out.println("\n╔══════════════════════════════════════════╗");
+        System.out.printf("║  ✅ 搜尋完成！耗時 %d ms，%d 個結果      ║%n", duration, pages.size());
+        System.out.println("╚══════════════════════════════════════════╝");
         
-        // 顯示結果摘要
         printResultsSummary(pages);
 
         return pages;
     }
 
     /**
-     * 爬取頁面內容和子網頁（有超時控制）
+     * 並行爬取所有頁面（效能大幅提升）
      */
-    private static void crawlPageAndSubpages(PageNode page, List<String> queryTokens) {
-        ExecutorService executor = Executors.newSingleThreadExecutor();
+    private static void parallelCrawl(List<PageNode> pages, List<String> queryTokens) {
+        // 建立爬取任務
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
         
-        try {
-            Future<?> future = executor.submit(() -> {
-                try {
-                    // 爬取網站（包含子網頁）
-                    SiteResult site = WebCrawler.crawlSite(page.getUrl());
-                    
-                    if (site.getMainPage() != null && site.getMainPage().isSuccess()) {
-                        // 設定主網頁內容
-                        page.setTextContent(site.getMainPage().getTextContent());
-                        page.setCrawled(true);
-                        
-                        // 處理子網頁
-                        for (CrawlResult subResult : site.getSubPages()) {
-                            SubPageNode subPage = new SubPageNode(
-                                subResult.getUrl(),
-                                subResult.getTitle(),
-                                subResult.getTextContent(),
-                                page.getUrl()
-                            );
-                            
-                            // 計算子網頁的 TF
-                            subPage.calculateTF(queryTokens);
-                            
-                            page.addSubPage(subPage);
-                        }
-                    }
-                } catch (Exception e) {
-                    System.out.println("[Crawl Error] " + page.getUrl() + " - " + e.getMessage());
-                }
-            });
+        for (PageNode page : pages) {
+            CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                crawlPageAndSubpages(page, queryTokens);
+            }, CRAWLER_POOL);
             
-            // 等待最多 10 秒
-            future.get(10, TimeUnit.SECONDS);
+            futures.add(future);
+        }
+        
+        // 等待所有任務完成（有總超時限制）
+        try {
+            CompletableFuture<Void> allFutures = CompletableFuture.allOf(
+                futures.toArray(new CompletableFuture[0])
+            );
+            
+            allFutures.get(CRAWL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            System.out.println("[Crawl] ✓ 所有爬蟲任務完成");
             
         } catch (TimeoutException e) {
-            System.out.println("[Crawl Timeout] " + page.getUrl());
+            System.out.println("[Crawl] ⚠ 爬蟲超時，使用已完成的結果");
+            // 取消未完成的任務
+            futures.forEach(f -> f.cancel(true));
         } catch (Exception e) {
-            System.out.println("[Crawl Error] " + page.getUrl() + " - " + e.getMessage());
-        } finally {
-            executor.shutdownNow();
+            System.out.println("[Crawl] ⚠ 爬蟲異常: " + e.getMessage());
         }
+        
+        // 統計爬取結果
+        long crawledCount = pages.stream().filter(PageNode::isCrawled).count();
+        long totalSubpages = pages.stream().mapToInt(PageNode::getSubPageCount).sum();
+        System.out.printf("[Crawl] 成功爬取 %d/%d 網站，共 %d 子網頁%n", 
+            crawledCount, pages.size(), totalSubpages);
+    }
+
+    /**
+     * 爬取單一頁面及其子網頁
+     */
+    private static void crawlPageAndSubpages(PageNode page, List<String> queryTokens) {
+        try {
+            // 爬取網站（包含子網頁）
+            SiteResult site = WebCrawler.crawlSite(page.getUrl());
+            
+            if (site.getMainPage() != null && site.getMainPage().isSuccess()) {
+                // 設定主網頁內容
+                page.setTextContent(site.getMainPage().getTextContent());
+                page.setCrawled(true);
+                
+                // 處理子網頁
+                for (CrawlResult subResult : site.getSubPages()) {
+                    SubPageNode subPage = new SubPageNode(
+                        subResult.getUrl(),
+                        subResult.getTitle(),
+                        subResult.getTextContent(),
+                        page.getUrl()
+                    );
+                    
+                    // 計算子網頁的 TF
+                    subPage.calculateTF(queryTokens);
+                    page.addSubPage(subPage);
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("[Crawl Error] " + page.getDomain() + " - " + e.getMessage());
+        }
+    }
+
+    /**
+     * 確保城市在查詢中
+     */
+    private static String ensureCityInQuery(String query, String userCity) {
+        if (userCity == null || userCity.isEmpty()) return query;
+        
+        String queryLower = query.toLowerCase();
+        boolean hasCity = CITY_ALIASES.keySet().stream()
+            .anyMatch(alias -> queryLower.contains(alias.toLowerCase()));
+        
+        if (!hasCity) {
+            return userCity + " " + query;
+        }
+        return query;
+    }
+
+    /**
+     * 查詢優化（動態年份 + 智慧過濾）
+     */
+    private static String refineQuery(String query) {
+        String q = query == null ? "" : query.trim();
+        if (q.isEmpty()) return q;
+
+        StringBuilder refined = new StringBuilder(q);
+        String lower = q.toLowerCase();
+        
+        // 檢查是否有城市
+        boolean hasCity = CITY_ALIASES.keySet().stream()
+            .anyMatch(alias -> lower.contains(alias.toLowerCase()));
+
+        // 如果有城市，加入活動相關詞
+        if (hasCity) {
+            refined.append(" 活動 OR 展覽 OR 演唱會 OR 市集");
+        }
+        
+        // 動態年份（當前年份和下一年）
+        int currentYear = LocalDate.now().getYear();
+        int nextYear = currentYear + 1;
+        refined.append(" ").append(currentYear).append(" OR ").append(nextYear);
+        
+        // 排除非活動頁面
+        refined.append(" -申請辦法 -徵選 -補助 -招標 -法規");
+        
+        // 優先活動平台
+        refined.append(" site:accupass.com OR site:kktix.com OR site:klook.com");
+        
+        return refined.toString();
+    }
+
+    /**
+     * 解析查詢 tokens（改進版）
+     */
+    private static List<String> parseQueryTokens(String query) {
+        List<String> tokens = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        
+        for (String t : query.split("\\s+")) {
+            t = t.trim().toLowerCase();
+            
+            // 跳過太短、重複、或特殊詞
+            if (t.length() < 2) continue;
+            if (seen.contains(t)) continue;
+            if (t.startsWith("-")) continue;
+            if (t.equalsIgnoreCase("OR") || t.equalsIgnoreCase("AND")) continue;
+            if (t.startsWith("site:")) continue;
+            
+            // 跳過純數字（年份）
+            if (t.matches("\\d+")) continue;
+            
+            seen.add(t);
+            tokens.add(t);
+        }
+        
+        return tokens;
     }
 
     /**
@@ -191,23 +308,24 @@ public class SearchEngine {
         
         // 已過期則跳過
         if (eventDate != null && eventDate.isBefore(today)) {
-            System.out.println("[Skip] 已過期: " + r.title);
+            System.out.println("[Skip] 已過期: " + truncate(r.title, 40));
             return null;
         }
         
-        // 計算詞頻
+        // 計算詞頻（使用加權）
         Map<Keyword, Integer> tf = new HashMap<>();
         for (String token : queryTokens) {
             Keyword k = Keyword.of(token);
             tf.put(k, tf.getOrDefault(k, 0) + 1);
         }
         
-        // 加入活動關鍵字
+        // 加入活動關鍵字（帶權重）
         String titleLower = r.title.toLowerCase();
-        for (String term : EVENT_TERMS) {
-            if (titleLower.contains(term.toLowerCase())) {
-                Keyword k = Keyword.of(term);
-                tf.put(k, tf.getOrDefault(k, 0) + 1);
+        for (Map.Entry<String, Double> entry : EVENT_TERMS_WEIGHTED.entrySet()) {
+            if (titleLower.contains(entry.getKey().toLowerCase())) {
+                Keyword k = Keyword.of(entry.getKey());
+                int weight = (int) Math.ceil(entry.getValue());
+                tf.put(k, tf.getOrDefault(k, 0) + weight);
             }
         }
         
@@ -219,7 +337,6 @@ public class SearchEngine {
         if (city == null) city = userCity != null ? userCity : "";
         
         // 建立節點
-        List<String> tokens = new ArrayList<>(queryTokens);
         return PageNode.of(
             r.link,
             r.title,
@@ -227,49 +344,8 @@ public class SearchEngine {
             eventDate,
             city,
             extractDomain(r.link),
-            tokens
+            new ArrayList<>(queryTokens)
         );
-    }
-
-    /**
-     * 查詢優化
-     */
-    private static String refineQuery(String query) {
-        String q = query == null ? "" : query.trim();
-        if (q.isEmpty()) return q;
-
-        String lower = q.toLowerCase();
-        boolean hasCity = CITY_ALIASES.keySet().stream()
-            .anyMatch(alias -> lower.contains(alias.toLowerCase()));
-
-        if (hasCity) {
-            q += " 活動 OR 展覽 OR 演唱會";
-        }
-        
-        // 加入時間
-        q += " 2024 OR 2025";
-        
-        // 排除申請/辦法
-        q += " -申請辦法 -徵選 -補助";
-        
-        return q;
-    }
-
-    /**
-     * 解析查詢 tokens
-     */
-    private static List<String> parseQueryTokens(String query) {
-        List<String> tokens = new ArrayList<>();
-        for (String t : query.split("\\s+")) {
-            t = t.trim();
-            if (!t.isEmpty() && t.length() >= 2 && !t.startsWith("-")) {
-                // 移除 OR, AND 等
-                if (!t.equalsIgnoreCase("OR") && !t.equalsIgnoreCase("AND")) {
-                    tokens.add(t);
-                }
-            }
-        }
-        return tokens;
     }
 
     /**
@@ -279,28 +355,26 @@ public class SearchEngine {
         String t = title.toLowerCase();
         String u = url.toLowerCase();
         
-        Set<String> excludeKeywords = Set.of(
-            "申請", "補助辦法", "徵選辦法", "作業要點",
-            "徵件須知", "注意事項", "法規", "條例",
-            "下載專區", "表格下載"
-        );
-        
-        for (String kw : excludeKeywords) {
-            if (t.contains(kw) || u.contains(kw)) {
+        for (String kw : EXCLUDE_KEYWORDS) {
+            if (t.contains(kw.toLowerCase()) || u.contains(kw.toLowerCase())) {
                 return true;
             }
         }
+        
+        // 排除政府招標/法規網站
+        if (u.contains("law.moj.gov.tw")) return true;
+        if (u.contains("pcc.gov.tw")) return true;  // 採購網
         
         return false;
     }
 
     /**
-     * 從標題提取日期
+     * 從標題提取日期（增強版）
      */
     private static LocalDate extractDateFromTitle(String title, LocalDate today) {
         if (title == null) return null;
         
-        // 2024/10/26
+        // 格式: 2024/10/26 或 2024-10-26 或 2024.10.26
         Pattern p1 = Pattern.compile("(202\\d)[./\\-](\\d{1,2})[./\\-](\\d{1,2})");
         Matcher m1 = p1.matcher(title);
         if (m1.find()) {
@@ -313,18 +387,37 @@ public class SearchEngine {
             } catch (Exception e) {}
         }
         
-        // 10月26日
-        Pattern p2 = Pattern.compile("(\\d{1,2})月(\\d{1,2})日");
+        // 格式: 10月26日 或 10/26
+        Pattern p2 = Pattern.compile("(\\d{1,2})月(\\d{1,2})日?");
         Matcher m2 = p2.matcher(title);
         if (m2.find()) {
             try {
                 int month = Integer.parseInt(m2.group(1));
                 int day = Integer.parseInt(m2.group(2));
-                LocalDate date = LocalDate.of(today.getYear(), month, day);
-                if (date.isBefore(today)) {
-                    date = date.plusYears(1);
+                if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+                    LocalDate date = LocalDate.of(today.getYear(), month, day);
+                    if (date.isBefore(today)) {
+                        date = date.plusYears(1);
+                    }
+                    return date;
                 }
-                return date;
+            } catch (Exception e) {}
+        }
+        
+        // 格式: 12/25 (斜線)
+        Pattern p3 = Pattern.compile("(\\d{1,2})/(\\d{1,2})(?!\\d)");
+        Matcher m3 = p3.matcher(title);
+        if (m3.find()) {
+            try {
+                int month = Integer.parseInt(m3.group(1));
+                int day = Integer.parseInt(m3.group(2));
+                if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+                    LocalDate date = LocalDate.of(today.getYear(), month, day);
+                    if (date.isBefore(today)) {
+                        date = date.plusYears(1);
+                    }
+                    return date;
+                }
             } catch (Exception e) {}
         }
         
@@ -353,15 +446,27 @@ public class SearchEngine {
             return "";
         }
     }
+    
+    private static String truncate(String s, int len) {
+        if (s == null) return "";
+        return s.length() > len ? s.substring(0, len) + "..." : s;
+    }
 
     private static void printResultsSummary(List<PageNode> pages) {
-        System.out.println("\n--- 結果摘要 ---");
+        System.out.println("\n📊 Top 5 結果：");
+        System.out.println("─".repeat(60));
         int rank = 1;
         for (PageNode p : pages) {
-            System.out.printf("#%d [%.1f] %s (%d 子網頁)%n", 
-                rank++, p.getTotalScore(), p.getTitle(), p.getSubPageCount());
+            String crawlStatus = p.isCrawled() ? "✓" : "✗";
+            System.out.printf("#%d [%.1f] %s %s (%d 子頁)%n", 
+                rank++, 
+                p.getTotalScore(), 
+                crawlStatus,
+                truncate(p.getTitle(), 35), 
+                p.getSubPageCount());
             if (rank > 5) break;
         }
+        System.out.println("─".repeat(60));
     }
 
     public static Tree getLastSearchTree() {
@@ -370,5 +475,19 @@ public class SearchEngine {
     
     public static List<PageNode> getLastResults() {
         return lastResults;
+    }
+    
+    /**
+     * 關閉爬蟲執行緒池（應用結束時呼叫）
+     */
+    public static void shutdown() {
+        CRAWLER_POOL.shutdown();
+        try {
+            if (!CRAWLER_POOL.awaitTermination(5, TimeUnit.SECONDS)) {
+                CRAWLER_POOL.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            CRAWLER_POOL.shutdownNow();
+        }
     }
 }

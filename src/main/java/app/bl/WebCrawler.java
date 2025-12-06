@@ -8,116 +8,124 @@ import java.time.Duration;
 import java.util.*;
 import java.util.regex.*;
 import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
 /**
- * WebCrawler - 網頁爬蟲（修復版）
+ * WebCrawler v2.0 - 高效能爬蟲
  * 
- * 功能：
- * 1. 爬取網頁 HTML 內容
- * 2. 提取標題、文字內容
- * 3. 提取所有子連結 <a href>
- * 4. 支援同網域子網頁爬取
+ * 優化重點：
+ * 1. 共享 HttpClient（連接池復用）
+ * 2. 更智慧的子網頁選擇
+ * 3. 優先爬取活動相關頁面
+ * 4. 更嚴格的超時控制
  */
 public class WebCrawler {
     
-    // 設定 - 更嚴格的超時
-    private static final int TIMEOUT_SECONDS = 5;           // 請求超時（縮短到 5 秒）
-    private static final int MAX_SUBPAGES = 5;              // 每個網站最多爬 5 個子網頁
-    private static final int MAX_CONTENT_LENGTH = 200000;   // 最大內容長度 (200KB)
-    private static final int CRAWL_DELAY_MS = 200;          // 爬取間隔
-    private static final int MAX_TOTAL_TIME_MS = 8000;      // 每個網站最多花 8 秒
+    // ============ 設定 ============
+    private static final int CONNECT_TIMEOUT_SECONDS = 3;     // 連線超時
+    private static final int REQUEST_TIMEOUT_SECONDS = 5;     // 請求超時
+    private static final int MAX_SUBPAGES = 6;                // 最多爬 6 個子網頁
+    private static final int MAX_CONTENT_LENGTH = 150000;     // 150KB
+    private static final int CRAWL_DELAY_MS = 100;            // 爬取間隔（減少）
+    private static final int MAX_SITE_TIME_MS = 6000;         // 每站最多 6 秒
     
-    // HTTP Client（重複使用）- 更短的超時
-    private static final HttpClient httpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(3))
+    // 共享 HttpClient（效能關鍵！）
+    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
         .followRedirects(HttpClient.Redirect.NORMAL)
+        .version(HttpClient.Version.HTTP_2)  // 使用 HTTP/2
         .build();
     
-    // User-Agent（模擬瀏覽器）
-    private static final String USER_AGENT = 
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-
-    // 應該跳過的 URL 模式
+    // User-Agent 輪替（避免被封鎖）
+    private static final List<String> USER_AGENTS = List.of(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0"
+    );
+    private static int userAgentIndex = 0;
+    
+    // 跳過的副檔名
     private static final Set<String> SKIP_EXTENSIONS = Set.of(
-        ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp",  // 圖片
-        ".pdf", ".doc", ".docx", ".xls", ".xlsx",          // 文件
-        ".mp3", ".mp4", ".avi", ".mov",                    // 媒體
-        ".zip", ".rar", ".7z",                             // 壓縮檔
-        ".css", ".js", ".json", ".xml"                     // 資源檔
+        ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".ico",
+        ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+        ".mp3", ".mp4", ".avi", ".mov", ".wav", ".flac",
+        ".zip", ".rar", ".7z", ".gz", ".tar",
+        ".css", ".js", ".json", ".xml", ".rss"
     );
     
-    // 應該跳過的路徑
+    // 跳過的路徑
     private static final Set<String> SKIP_PATHS = Set.of(
-        "/login", "/signup", "/register", "/logout",
-        "/cart", "/checkout", "/account", "/admin",
-        "/api/", "/static/", "/assets/", "/images/",
-        "/privacy", "/terms", "/about", "/contact"
+        "/login", "/signup", "/register", "/logout", "/auth",
+        "/cart", "/checkout", "/account", "/admin", "/dashboard",
+        "/api/", "/static/", "/assets/", "/images/", "/img/",
+        "/privacy", "/terms", "/about-us", "/contact-us",
+        "/search", "/tag/", "/category/", "/author/"
+    );
+    
+    // 優先爬取的路徑（活動相關）
+    private static final Set<String> PRIORITY_PATHS = Set.of(
+        "/event", "/activity", "/exhibition", "/concert", "/show",
+        "/ticket", "/program", "/schedule", "/news", "/article",
+        "/detail", "/info"
     );
 
     /**
      * 爬取單一網頁
-     * 
-     * @param url 網頁 URL
-     * @return CrawlResult 爬取結果
      */
     public static CrawlResult crawl(String url) {
         CrawlResult result = new CrawlResult(url);
         
         try {
-            // 驗證 URL
             if (!isValidUrl(url)) {
                 result.setError("Invalid URL");
                 return result;
             }
             
-            // 發送請求
+            // 輪替 User-Agent
+            String userAgent = USER_AGENTS.get(userAgentIndex++ % USER_AGENTS.size());
+            
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .header("User-Agent", USER_AGENT)
-                .header("Accept", "text/html,application/xhtml+xml")
+                .header("User-Agent", userAgent)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9")
                 .header("Accept-Language", "zh-TW,zh;q=0.9,en;q=0.8")
-                .timeout(Duration.ofSeconds(TIMEOUT_SECONDS))
+                .header("Accept-Encoding", "identity")  // 不要壓縮，簡化處理
+                .timeout(Duration.ofSeconds(REQUEST_TIMEOUT_SECONDS))
                 .GET()
                 .build();
             
-            HttpResponse<String> response = httpClient.send(request, 
+            HttpResponse<String> response = HTTP_CLIENT.send(request, 
                 HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             
-            // 檢查狀態碼
-            if (response.statusCode() != 200) {
-                result.setError("HTTP " + response.statusCode());
+            int status = response.statusCode();
+            if (status != 200) {
+                result.setError("HTTP " + status);
                 return result;
             }
             
             String html = response.body();
-            
-            // 限制大小
             if (html.length() > MAX_CONTENT_LENGTH) {
                 html = html.substring(0, MAX_CONTENT_LENGTH);
             }
             
-            // 解析 HTML
+            // 解析
             result.setHtml(html);
             result.setTitle(extractTitle(html));
             result.setTextContent(extractTextContent(html));
             result.setLinks(extractLinks(html, url));
             result.setSuccess(true);
             
-            System.out.println("[Crawler] ✓ " + url + " (" + result.getLinks().size() + " links)");
-            
+        } catch (java.net.http.HttpTimeoutException e) {
+            result.setError("Timeout");
         } catch (Exception e) {
-            result.setError(e.getMessage());
-            System.out.println("[Crawler] ✗ " + url + " - " + e.getMessage());
+            result.setError(e.getClass().getSimpleName());
         }
         
         return result;
     }
     
     /**
-     * 爬取網站（包含子網頁）- 有時間限制
-     * 
-     * @param mainUrl 主網頁 URL
-     * @return SiteResult 網站爬取結果（含子網頁）
+     * 爬取網站（含智慧子網頁選擇）
      */
     public static SiteResult crawlSite(String mainUrl) {
         SiteResult site = new SiteResult(mainUrl);
@@ -131,114 +139,142 @@ public class WebCrawler {
             return site;
         }
         
-        // 檢查是否還有時間
-        if (System.currentTimeMillis() - startTime > MAX_TOTAL_TIME_MS) {
-            System.out.println("[Crawler] Time limit reached for: " + mainUrl);
+        // 檢查時間
+        if (System.currentTimeMillis() - startTime > MAX_SITE_TIME_MS) {
             return site;
         }
         
-        // 2. 取得同網域的子連結
+        // 2. 智慧選擇子網頁
         String domain = extractDomain(mainUrl);
-        List<String> subLinks = new ArrayList<>();
+        List<String> subLinks = selectBestSubpages(mainPage.getLinks(), domain, mainUrl);
         
-        for (String link : mainPage.getLinks()) {
-            // 只爬同網域
-            if (isSameDomain(link, domain) && !link.equals(mainUrl)) {
-                // 跳過不需要的頁面
-                if (shouldSkipUrl(link)) continue;
-                
-                subLinks.add(link);
-                if (subLinks.size() >= MAX_SUBPAGES) break;
+        // 3. 並行爬取子網頁（效能提升）
+        if (!subLinks.isEmpty()) {
+            List<CompletableFuture<CrawlResult>> futures = subLinks.stream()
+                .map(link -> CompletableFuture.supplyAsync(() -> {
+                    try {
+                        Thread.sleep(CRAWL_DELAY_MS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    return crawl(link);
+                }))
+                .collect(Collectors.toList());
+            
+            // 收集結果（有時間限制）
+            long remainingTime = MAX_SITE_TIME_MS - (System.currentTimeMillis() - startTime);
+            if (remainingTime > 0) {
+                for (CompletableFuture<CrawlResult> future : futures) {
+                    try {
+                        CrawlResult subPage = future.get(
+                            Math.max(remainingTime, 1000), 
+                            TimeUnit.MILLISECONDS
+                        );
+                        if (subPage.isSuccess()) {
+                            site.addSubPage(subPage);
+                        }
+                    } catch (Exception e) {
+                        // 忽略超時的子網頁
+                    }
+                }
             }
         }
-        
-        // 3. 爬取子網頁（有時間限制）
-        for (String subLink : subLinks) {
-            // 檢查是否還有時間
-            if (System.currentTimeMillis() - startTime > MAX_TOTAL_TIME_MS) {
-                System.out.println("[Crawler] Time limit, stopping subpage crawl");
-                break;
-            }
-            
-            try {
-                Thread.sleep(CRAWL_DELAY_MS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-            
-            CrawlResult subPage = crawl(subLink);
-            if (subPage.isSuccess()) {
-                site.addSubPage(subPage);
-            }
-        }
-        
-        System.out.println("[Crawler] Site done: " + domain + 
-            " (1 main + " + site.getSubPages().size() + " sub) in " + 
-            (System.currentTimeMillis() - startTime) + "ms");
         
         return site;
     }
     
     /**
-     * 批量爬取多個網站（並行）
+     * 智慧選擇最佳子網頁（核心優化）
      */
-    public static List<SiteResult> crawlSites(List<String> urls) {
-        List<SiteResult> results = new ArrayList<>();
+    private static List<String> selectBestSubpages(List<String> links, String domain, String mainUrl) {
+        if (links == null || links.isEmpty()) return Collections.emptyList();
         
-        // 使用執行緒池並行爬取
-        ExecutorService executor = Executors.newFixedThreadPool(3); // 3 個並行
-        List<Future<SiteResult>> futures = new ArrayList<>();
+        // 分類連結
+        List<String> priorityLinks = new ArrayList<>();
+        List<String> normalLinks = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        seen.add(mainUrl.toLowerCase());
         
-        for (String url : urls) {
-            futures.add(executor.submit(() -> crawlSite(url)));
-        }
-        
-        for (Future<SiteResult> future : futures) {
-            try {
-                SiteResult result = future.get(30, TimeUnit.SECONDS);
-                results.add(result);
-            } catch (Exception e) {
-                System.out.println("[Crawler] Site timeout or error");
+        for (String link : links) {
+            String lowerLink = link.toLowerCase();
+            
+            // 跳過已見過的
+            if (seen.contains(lowerLink)) continue;
+            seen.add(lowerLink);
+            
+            // 只要同網域
+            if (!isSameDomain(link, domain)) continue;
+            
+            // 跳過不需要的
+            if (shouldSkipUrl(link)) continue;
+            
+            // 優先連結
+            boolean isPriority = PRIORITY_PATHS.stream()
+                .anyMatch(path -> lowerLink.contains(path));
+            
+            if (isPriority) {
+                priorityLinks.add(link);
+            } else {
+                normalLinks.add(link);
             }
         }
         
-        executor.shutdown();
-        return results;
+        // 合併：優先連結在前
+        List<String> result = new ArrayList<>();
+        result.addAll(priorityLinks);
+        result.addAll(normalLinks);
+        
+        // 限制數量
+        return result.stream().limit(MAX_SUBPAGES).collect(Collectors.toList());
     }
 
-    // ============ HTML 解析方法 ============
+    // ============ HTML 解析 ============
     
-    /**
-     * 提取標題 <title>
-     */
     private static String extractTitle(String html) {
-        Pattern pattern = Pattern.compile("<title[^>]*>([^<]+)</title>", Pattern.CASE_INSENSITIVE);
-        Matcher matcher = pattern.matcher(html);
-        if (matcher.find()) {
-            return cleanText(matcher.group(1));
+        // <title>
+        Pattern p1 = Pattern.compile("<title[^>]*>([^<]+)</title>", Pattern.CASE_INSENSITIVE);
+        Matcher m1 = p1.matcher(html);
+        if (m1.find()) {
+            String title = cleanText(m1.group(1));
+            if (!title.isEmpty()) return title;
         }
         
-        // 嘗試 <h1>
-        pattern = Pattern.compile("<h1[^>]*>([^<]+)</h1>", Pattern.CASE_INSENSITIVE);
-        matcher = pattern.matcher(html);
-        if (matcher.find()) {
-            return cleanText(matcher.group(1));
+        // og:title
+        Pattern p2 = Pattern.compile("property=[\"']og:title[\"'][^>]+content=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE);
+        Matcher m2 = p2.matcher(html);
+        if (m2.find()) {
+            return cleanText(m2.group(1));
+        }
+        
+        // <h1>
+        Pattern p3 = Pattern.compile("<h1[^>]*>([^<]+)</h1>", Pattern.CASE_INSENSITIVE);
+        Matcher m3 = p3.matcher(html);
+        if (m3.find()) {
+            return cleanText(m3.group(1));
         }
         
         return "";
     }
     
-    /**
-     * 提取文字內容（移除 HTML 標籤）
-     */
     private static String extractTextContent(String html) {
-        // 移除 script 和 style
-        String text = html.replaceAll("(?i)<script[^>]*>[\\s\\S]*?</script>", "");
-        text = text.replaceAll("(?i)<style[^>]*>[\\s\\S]*?</style>", "");
+        // 移除不需要的區塊
+        String text = html;
+        text = text.replaceAll("(?is)<script[^>]*>.*?</script>", " ");
+        text = text.replaceAll("(?is)<style[^>]*>.*?</style>", " ");
+        text = text.replaceAll("(?is)<nav[^>]*>.*?</nav>", " ");
+        text = text.replaceAll("(?is)<footer[^>]*>.*?</footer>", " ");
+        text = text.replaceAll("(?is)<header[^>]*>.*?</header>", " ");
+        text = text.replaceAll("(?is)<!--.*?-->", " ");
         
         // 移除 HTML 標籤
         text = text.replaceAll("<[^>]+>", " ");
+        
+        // 清理 HTML 實體
+        text = text.replaceAll("&nbsp;", " ");
+        text = text.replaceAll("&amp;", "&");
+        text = text.replaceAll("&lt;", "<");
+        text = text.replaceAll("&gt;", ">");
+        text = text.replaceAll("&#\\d+;", " ");
         
         // 清理空白
         text = text.replaceAll("\\s+", " ").trim();
@@ -251,20 +287,18 @@ public class WebCrawler {
         return text;
     }
     
-    /**
-     * 提取所有連結 <a href>
-     */
     private static List<String> extractLinks(String html, String baseUrl) {
         List<String> links = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         
-        Pattern pattern = Pattern.compile("<a[^>]+href=[\"']([^\"'#]+)[\"']", Pattern.CASE_INSENSITIVE);
+        Pattern pattern = Pattern.compile(
+            "<a[^>]+href=[\"']([^\"'#?]+)[\"']",
+            Pattern.CASE_INSENSITIVE
+        );
         Matcher matcher = pattern.matcher(html);
         
-        while (matcher.find()) {
+        while (matcher.find() && links.size() < 100) {  // 限制數量
             String href = matcher.group(1).trim();
-            
-            // 轉換相對路徑為絕對路徑
             String absoluteUrl = resolveUrl(href, baseUrl);
             
             if (absoluteUrl != null && !seen.contains(absoluteUrl)) {
@@ -275,8 +309,8 @@ public class WebCrawler {
         
         return links;
     }
-    
-    // ============ URL 工具方法 ============
+
+    // ============ URL 工具 ============
     
     private static boolean isValidUrl(String url) {
         if (url == null || url.isEmpty()) return false;
@@ -292,7 +326,8 @@ public class WebCrawler {
     private static String extractDomain(String url) {
         try {
             URI uri = URI.create(url);
-            return uri.getHost();
+            String host = uri.getHost();
+            return host != null ? host.toLowerCase() : "";
         } catch (Exception e) {
             return "";
         }
@@ -300,9 +335,9 @@ public class WebCrawler {
     
     private static boolean isSameDomain(String url, String domain) {
         String urlDomain = extractDomain(url);
-        if (urlDomain == null || domain == null) return false;
+        if (urlDomain.isEmpty() || domain == null) return false;
         
-        // 處理 www 前綴
+        // 移除 www
         urlDomain = urlDomain.replaceFirst("^www\\.", "");
         domain = domain.replaceFirst("^www\\.", "");
         
@@ -312,21 +347,29 @@ public class WebCrawler {
     private static boolean shouldSkipUrl(String url) {
         String lower = url.toLowerCase();
         
-        // 跳過特定副檔名
+        // 副檔名
         for (String ext : SKIP_EXTENSIONS) {
             if (lower.endsWith(ext)) return true;
         }
         
-        // 跳過特定路徑
+        // 路徑
         for (String path : SKIP_PATHS) {
             if (lower.contains(path)) return true;
         }
+        
+        // 太長的 URL 通常是追蹤連結
+        if (url.length() > 300) return true;
         
         return false;
     }
     
     private static String resolveUrl(String href, String baseUrl) {
         try {
+            if (href == null || href.isEmpty()) return null;
+            if (href.startsWith("javascript:")) return null;
+            if (href.startsWith("mailto:")) return null;
+            if (href.startsWith("tel:")) return null;
+            
             if (href.startsWith("http://") || href.startsWith("https://")) {
                 return href;
             }
@@ -342,7 +385,11 @@ public class WebCrawler {
             }
             
             // 相對路徑
-            String basePath = baseUrl.substring(0, baseUrl.lastIndexOf('/') + 1);
+            String basePath = baseUrl;
+            int lastSlash = basePath.lastIndexOf('/');
+            if (lastSlash > 8) {  // 在 "https://" 之後
+                basePath = basePath.substring(0, lastSlash + 1);
+            }
             return basePath + href;
             
         } catch (Exception e) {
@@ -357,11 +404,8 @@ public class WebCrawler {
     
     // ============ 資料結構 ============
     
-    /**
-     * 單一網頁爬取結果
-     */
     public static class CrawlResult {
-        private String url;
+        private final String url;
         private String title = "";
         private String textContent = "";
         private String html = "";
@@ -371,29 +415,25 @@ public class WebCrawler {
         
         public CrawlResult(String url) { this.url = url; }
         
-        // Getters & Setters
         public String getUrl() { return url; }
         public String getTitle() { return title; }
-        public void setTitle(String title) { this.title = title; }
+        public void setTitle(String title) { this.title = title != null ? title : ""; }
         public String getTextContent() { return textContent; }
-        public void setTextContent(String textContent) { this.textContent = textContent; }
+        public void setTextContent(String textContent) { this.textContent = textContent != null ? textContent : ""; }
         public String getHtml() { return html; }
-        public void setHtml(String html) { this.html = html; }
+        public void setHtml(String html) { this.html = html != null ? html : ""; }
         public List<String> getLinks() { return links; }
-        public void setLinks(List<String> links) { this.links = links; }
+        public void setLinks(List<String> links) { this.links = links != null ? links : new ArrayList<>(); }
         public boolean isSuccess() { return success; }
         public void setSuccess(boolean success) { this.success = success; }
         public String getError() { return error; }
         public void setError(String error) { this.error = error; this.success = false; }
     }
     
-    /**
-     * 網站爬取結果（含子網頁）
-     */
     public static class SiteResult {
-        private String url;
+        private final String url;
         private CrawlResult mainPage;
-        private List<CrawlResult> subPages = new ArrayList<>();
+        private final List<CrawlResult> subPages = new ArrayList<>();
         
         public SiteResult(String url) { this.url = url; }
         
@@ -402,13 +442,7 @@ public class WebCrawler {
         public void setMainPage(CrawlResult mainPage) { this.mainPage = mainPage; }
         public List<CrawlResult> getSubPages() { return subPages; }
         public void addSubPage(CrawlResult page) { this.subPages.add(page); }
-        
-        public int getTotalPages() {
-            return 1 + subPages.size();
-        }
-        
-        public String getDomain() {
-            return extractDomain(url);
-        }
+        public int getTotalPages() { return 1 + subPages.size(); }
+        public String getDomain() { return extractDomain(url); }
     }
 }
