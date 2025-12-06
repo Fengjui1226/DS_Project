@@ -4,23 +4,20 @@ import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
 /**
- * RankCalculator v3.0 - 最終優化版
+ * RankCalculator v3.1 - 精準匹配優化版
  * 
  * 核心改進：
- * 1. 內文語義配對為主體，標題只是輔助
- * 2. 子頁面加分
- * 3. 日期分數（越近越高，過期扣分）
- * 4. 來源可信度
+ * 1. 完整查詢匹配超高加分
+ * 2. 專有名詞（機構/地點）匹配優先
+ * 3. 匹配比例計算（匹配越多關鍵字分數越高）
+ * 4. 標題匹配權重大幅提升
  */
 public class RankCalculator {
 
-    private static final double SUBPAGE_WEIGHT = 0.35;
-    
     // ============ 來源可信度 ============
     private static final Map<String, Double> TICKET_PLATFORMS = Map.of(
         "kktix.com", 2.2,
@@ -63,6 +60,20 @@ public class RankCalculator {
     );
     private static final double SHOPPING_PENALTY = 0.2;
 
+    // ============ 專有名詞（高權重）============
+    private static final Set<String> PROPER_NOUNS = Set.of(
+        // 大學
+        "政大", "台大", "師大", "清大", "交大", "成大", "中央", "中山", "中興", "北大",
+        "輔大", "東吳", "淡江", "文化", "銘傳", "世新", "實踐", "逢甲", "元智", "長庚",
+        // 場館
+        "華山", "松菸", "駁二", "小巨蛋", "大巨蛋", "國家音樂廳", "兩廳院", "故宮",
+        "北美館", "當代藝術館", "科博館", "科工館", "海生館",
+        // 品牌活動
+        "簡單生活節", "大港開唱", "覺醒音樂祭", "春浪", "貢寮海洋音樂祭",
+        // 地標
+        "信義區", "西門", "東區", "中山", "大安", "士林"
+    );
+
     // ============ 內容懲罰 ============
     private static final Set<String> APPLICATION_KEYWORDS = Set.of(
         "申請", "補助", "辦法", "要點", "徵選", "徵件", 
@@ -82,10 +93,11 @@ public class RankCalculator {
 
     // ============ 主要排名方法 ============
     
-    public static void rank(List<PageNode> pages, UserProfile user) {
+    public static void rank(List<PageNode> pages, UserProfile user, String originalQuery) {
         if (pages == null || pages.isEmpty()) return;
 
         System.out.println("\n🎯 開始計算排名分數...");
+        System.out.println("📝 原始查詢: " + originalQuery);
         
         // 取得查詢 tokens
         List<String> queryTokens = new ArrayList<>();
@@ -94,11 +106,27 @@ public class RankCalculator {
             break;
         }
         
+        // 識別專有名詞 tokens（高權重）
+        List<String> properNounTokens = new ArrayList<>();
+        List<String> normalTokens = new ArrayList<>();
+        
+        for (String token : queryTokens) {
+            if (isProperNoun(token)) {
+                properNounTokens.add(token);
+            } else {
+                normalTokens.add(token);
+            }
+        }
+        
+        System.out.println("🔑 專有名詞: " + properNounTokens);
+        System.out.println("🔤 一般關鍵字: " + normalTokens);
+        
         LocalDate today = LocalDate.now();
 
         // 計算每個頁面的分數
         for (PageNode p : pages) {
-            double score = calculatePageScore(p, user, queryTokens, today);
+            double score = calculatePageScore(p, user, originalQuery, 
+                    properNounTokens, normalTokens, today);
             p.setTotalScore(score);
         }
 
@@ -110,86 +138,121 @@ public class RankCalculator {
         
         System.out.println("✅ 排名計算完成");
     }
+    
+    // 向後兼容的舊方法
+    public static void rank(List<PageNode> pages, UserProfile user) {
+        rank(pages, user, null);
+    }
 
     /**
-     * ★ 核心：計算頁面分數（重寫版）
+     * 檢查是否為專有名詞
      */
-    private static double calculatePageScore(PageNode p, UserProfile user, 
-            List<String> tokens, LocalDate today) {
+    private static boolean isProperNoun(String token) {
+        for (String noun : PROPER_NOUNS) {
+            if (token.contains(noun) || noun.contains(token)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * ★ 核心：計算頁面分數（v3.1 精準匹配版）
+     */
+    private static double calculatePageScore(PageNode p, UserProfile user,
+            String originalQuery, List<String> properNouns, 
+            List<String> normalTokens, LocalDate today) {
         
         double score = 0;
-
-        // ① 內文語義配對 (主體) - 權重 x3
-        score += semanticScore(p.getTextContent(), tokens) * 3;
-
-        // ② 標題加權
-        String title = p.getTitle() != null ? p.getTitle().toLowerCase() : "";
-        for (String t : tokens) {
-            if (title.contains(t.toLowerCase())) {
-                score += 1.5;
+        String title = p.getTitle() != null ? p.getTitle() : "";
+        String titleLower = title.toLowerCase();
+        String content = p.getTextContent() != null ? p.getTextContent() : "";
+        String contentLower = content.toLowerCase();
+        
+        // ★★★ 第一優先：完整查詢匹配 ★★★
+        if (originalQuery != null && !originalQuery.isEmpty()) {
+            if (title.contains(originalQuery)) {
+                score += 50;  // 標題完全包含查詢 = 超高分
+                System.out.println("  🎯 完整匹配標題: " + title.substring(0, Math.min(30, title.length())));
+            } else if (content.contains(originalQuery)) {
+                score += 25;  // 內文包含完整查詢
             }
         }
 
-        // ③ 子頁面加分
-        for (SubPageNode sp : p.getSubPages()) {
-            score += semanticScore(sp.getTextContent(), tokens);
+        // ★★ 第二優先：專有名詞匹配（權重 x5）★★
+        int properNounMatches = 0;
+        for (String noun : properNouns) {
+            if (titleLower.contains(noun.toLowerCase())) {
+                score += 15;  // 標題中有專有名詞
+                properNounMatches++;
+            } else if (contentLower.contains(noun.toLowerCase())) {
+                score += 5;   // 內文中有專有名詞
+                properNounMatches++;
+            }
+        }
+        
+        // 如果有專有名詞但一個都沒匹配 = 大扣分
+        if (!properNouns.isEmpty() && properNounMatches == 0) {
+            score -= 20;  // 懲罰：搜「政大」但結果完全沒有政大
         }
 
-        // ④ 日期分數 (越近越高)
+        // ★ 第三優先：一般關鍵字匹配 ★
+        int normalMatches = 0;
+        for (String token : normalTokens) {
+            if (titleLower.contains(token.toLowerCase())) {
+                score += 3;
+                normalMatches++;
+            } else if (contentLower.contains(token.toLowerCase())) {
+                score += 1;
+                normalMatches++;
+            }
+        }
+
+        // ④ 匹配比例加成
+        int totalTokens = properNouns.size() + normalTokens.size();
+        int totalMatches = properNounMatches + normalMatches;
+        if (totalTokens > 0) {
+            double matchRatio = (double) totalMatches / totalTokens;
+            score *= (1 + matchRatio);  // 匹配越多，分數越高
+        }
+
+        // ⑤ 日期分數 (越近越高)
         LocalDate d = p.getEventDate();
         if (d != null) {
             long days = ChronoUnit.DAYS.between(today, d);
             if (days >= 0 && days < 60) {
-                score += 15;  // 兩個月內超加分
+                score += 10;  // 兩個月內加分
             } else if (days >= 0) {
-                score += 5;   // 未來但較遠
+                score += 3;   // 未來但較遠
             } else {
-                score -= 10;  // 過期扣分
+                score -= 15;  // 過期扣分（加重）
             }
         }
 
-        // ⑤ 來源可信度
+        // ⑥ 來源可信度
         String domain = p.getDomain() != null ? p.getDomain().toLowerCase() : "";
         double sourceMultiplier = calculateSourceMultiplier(domain);
         score *= sourceMultiplier;
 
-        // ⑥ 內容懲罰
+        // ⑦ 內容懲罰
         double contentMultiplier = calculateContentMultiplier(title, p.getUrl());
         score *= contentMultiplier;
 
-        // ⑦ 活動類型加分
+        // ⑧ 活動類型加分
         for (Map.Entry<String, Double> entry : EVENT_TYPE_BOOST.entrySet()) {
-            if (title.contains(entry.getKey().toLowerCase())) {
+            if (titleLower.contains(entry.getKey().toLowerCase())) {
                 score *= entry.getValue();
+                break;  // 只取一次
             }
         }
 
-        // ⑧ 地區匹配
+        // ⑨ 地區匹配
         String userCity = user != null ? user.getUserCity() : null;
         if (userCity != null && p.getCity() != null && p.getCity().equals(userCity)) {
-            score *= 1.3;
+            score *= 1.2;
         }
 
         return Math.max(0.1, score);
-    }
-
-    /**
-     * ★ 新增：語義分數計算
-     * 內文關鍵字每個加 2 分
-     */
-    private static double semanticScore(String text, List<String> tokens) {
-        if (text == null || text.isEmpty()) return 0;
-
-        double score = 0;
-        String lower = text.toLowerCase();
-
-        for (String t : tokens) {
-            if (lower.contains(t.toLowerCase())) {
-                score += 2.0;
-            }
-        }
-
-        return score;
     }
 
     private static double calculateSourceMultiplier(String domain) {

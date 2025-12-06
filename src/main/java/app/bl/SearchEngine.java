@@ -102,12 +102,15 @@ public class SearchEngine {
      */
     public static List<PageNode> search(String query, UserProfile user) throws Exception {
         System.out.println("\n╔══════════════════════════════════════════╗");
-        System.out.println("║   🔍 EventFinder v3.0 (最終優化版)        ║");
+        System.out.println("║   🔍 EventFinder v3.1 (精準匹配版)        ║");
         System.out.println("╚══════════════════════════════════════════╝");
         System.out.println("[Query] " + query);
 
         long startTime = System.currentTimeMillis();
         LocalDate today = LocalDate.now();
+        
+        // ★ 保存原始查詢（給 RankCalculator 用）
+        String originalQuery = query;
 
         // 1. 確保城市有被放進查詢字串
         String userCity = (user != null) ? user.getUserCity() : null;
@@ -173,9 +176,9 @@ public class SearchEngine {
         System.out.printf("[Filter] 未過期或無日期: %d, 已過期: %d%n",
                 pagesToRank.size(), expiredPages.size());
 
-        // 8. 計算 ranking 分數
+        // 8. 計算 ranking 分數（傳入原始查詢）
         System.out.println("\n[Step 3] 計算分數...");
-        RankCalculator.rank(pagesToRank, user);
+        RankCalculator.rank(pagesToRank, user, originalQuery);
 
         // 9. 建立樹狀結構
         Tree tree = new Tree();
