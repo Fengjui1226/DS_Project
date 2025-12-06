@@ -41,6 +41,44 @@ public class SearchEngine {
         "festival", "concert", "exhibition", "event",
         "表演", "藝術", "體驗", "親子", "戶外", "講座"
     );
+    // 語義關聯關鍵字：同一概念的一整包詞
+private static final Map<String, List<String>> SEMANTIC_GROUPS = Map.ofEntries(
+    // 市集相關
+    Map.entry("市集", List.of(
+        "市集", "創意市集", "文創市集", "假日市集", "週末市集",
+        "手作市集", "跳蚤市場", "攤位", "攤商", "市集活動"
+    )),
+
+    // 展覽相關
+    Map.entry("展覽", List.of(
+        "展覽", "特展", "展出", "作品展", "聯展",
+        "藝術展", "art exhibition", "exhibition"
+    )),
+
+    // 音樂／演唱會
+    Map.entry("音樂", List.of(
+        "音樂", "音樂節", "音樂會", "演唱會", "live house",
+        "concert", "live concert"
+    )),
+
+    // 親子
+    Map.entry("親子", List.of(
+        "親子活動", "親子", "親子同樂", "家庭活動", "小朋友",
+        "親子市集"
+    )),
+
+    // 戶外
+    Map.entry("戶外", List.of(
+        "戶外", "戶外活動", "露營", "野餐", "健行", "登山",
+        "outdoor", "hiking", "camping"
+    )),
+
+    // 運動
+    Map.entry("運動", List.of(
+        "運動", "運動賽事", "馬拉松", "路跑", "跑步",
+        "籃球賽", "足球賽", "比賽", "競賽"
+    ))
+);
     // 類型關鍵字 → 要自動擴充的相關搜尋詞
     // 例如使用者按「市集」，會自動加上 文創市集、假日市集、聖誕市集...
     private static final Map<String, List<String>> CATEGORY_EXPANSIONS = Map.of(
