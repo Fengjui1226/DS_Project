@@ -1019,6 +1019,8 @@ footer {
   .result-footer > * { text-align: center; }
   
   .pagination { flex-wrap: wrap; }
+
+  .related-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 480px) {
@@ -1026,4 +1028,58 @@ footer {
   .search-card { padding: 24px; }
   .categories { gap: 8px; }
   .cat-btn { padding: 10px 14px; font-size: 13px; }
+}
+
+/* ============ RELATED SEARCHES (Google Style) ============ */
+
+.related-searches {
+  margin-top: 48px;
+  padding: 32px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+
+.related-searches h3 {
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 24px;
+}
+
+.related-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.related-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 28px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.related-item:hover {
+  background: var(--card-hover);
+  border-color: var(--primary);
+  transform: translateX(4px);
+}
+
+.related-text {
+  flex: 1;
+}
+
+.related-icon {
+  font-size: 14px;
+  opacity: 0.5;
+  margin-left: 12px;
 }

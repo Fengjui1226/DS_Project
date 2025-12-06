@@ -79,6 +79,9 @@ export const translations = {
     foundPages: '找到 {count} 個相關頁面',
     close: '關閉',
     
+    // 推薦搜尋
+    relatedSearches: '其他人也搜尋了以下項目',
+    
     // 錯誤訊息
     errors: {
       network: '網路連線失敗，請檢查網路',
@@ -171,6 +174,9 @@ export const translations = {
     foundPages: 'Found {count} related pages',
     close: 'Close',
     
+    // Related searches
+    relatedSearches: 'People also searched for',
+    
     errors: {
       network: 'Network error. Please check your connection.',
       server: 'Server is busy. Please try again later.',
@@ -260,6 +266,9 @@ export const translations = {
     foundPages: '{count}件の関連ページ',
     close: '閉じる',
     
+    // Related searches
+    relatedSearches: '他の人はこちらも検索',
+    
     errors: {
       network: 'ネットワークエラー',
       server: 'サーバーが混雑しています',
@@ -348,6 +357,9 @@ export const translations = {
     relatedPages: '관련 페이지',
     foundPages: '{count}개의 관련 페이지',
     close: '닫기',
+    
+    // Related searches
+    relatedSearches: '다른 사람들이 검색한 항목',
     
     errors: {
       network: '네트워크 오류. 연결을 확인하세요.',

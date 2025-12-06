@@ -7,6 +7,7 @@ import Pagination from './components/Pagination';
 import SubpageModal from './components/SubpageModal';
 import SearchHistory from './components/SearchHistory';
 import LanguageSelector from './components/LanguageSelector';
+import RelatedSearches from './components/RelatedSearches';
 import './index.css';
 
 const API_BASE = '/api';
@@ -76,8 +77,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [categories, setCategories] = useState([]);
-  const [semantic, setSemantic] = useState(null);
-  const [tree, setTree] = useState(null);
+  const [relatedSearches, setRelatedSearches] = useState([]);
   
   // 分頁
   const [currentPage, setCurrentPage] = useState(1);
@@ -102,7 +102,7 @@ export default function App() {
   // 彈窗 & 建議
   const [subpageModal, setSubpageModal] = useState({ open: false, domain: '', data: null });
   const [suggestions, setSuggestions] = useState([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState([]);
   
   // ============ 穩定性：請求限流 ============
   const lastRequestTime = useRef(0);
@@ -248,8 +248,8 @@ export default function App() {
           totalCount: data.totalCount || 0
         });
         
-        loadSemantic();
-        loadTree();
+        // 載入推薦關鍵字
+        loadRelatedSearches(q, apiCity);
       } else {
         setError(data.error || t(lang, 'errors.unknown'));
       }
@@ -268,19 +268,14 @@ export default function App() {
     }
   };
 
-  const loadSemantic = async () => {
+  // 載入推薦關鍵字（Google 風格）
+  const loadRelatedSearches = async (q, c) => {
     try {
-      const res = await fetch(`${API_BASE}/semantic`);
+      const res = await fetch(`${API_BASE}/suggestions?query=${encodeURIComponent(q)}&city=${encodeURIComponent(c)}`);
       const data = await res.json();
-      if (data.success) setSemantic(data);
-    } catch {}
-  };
-
-  const loadTree = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/tree`);
-      const data = await res.json();
-      if (data.success) setTree(data);
+      if (data.success && data.suggestions) {
+        setRelatedSearches(data.suggestions);
+      }
     } catch {}
   };
 
@@ -522,14 +517,17 @@ export default function App() {
               T={T}
             />
           )}
+
+          {/* Google 風格的推薦搜尋 */}
+          <RelatedSearches 
+            suggestions={relatedSearches}
+            onSearch={(kw) => handleSearch(kw, city)}
+            T={T}
+          />
         </div>
 
         <Sidebar 
-          semantic={semantic}
-          tree={tree}
           favorites={favorites}
-          onKeywordClick={(kw) => handleSearch(kw, city)}
-          onDomainClick={handleSubpageQuery}
           onFavoriteRemove={(url) => setFavorites(favorites.filter(f => f.url !== url))}
           T={T}
         />

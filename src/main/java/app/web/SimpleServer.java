@@ -8,10 +8,9 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
-import java.time.Instant;
 
 /**
- * SimpleServer - 支援爬蟲和子網頁顯示
+ * SimpleServer v3.0 - 支援爬蟲 + 關鍵字推薦
  */
 public class SimpleServer {
     
@@ -29,6 +28,8 @@ public class SimpleServer {
     
     private static UserProfile userProfile = new UserProfile();
     private static List<PageNode> lastResults = new ArrayList<>();
+    private static String lastQuery = "";
+    private static String lastCity = "台北";
     
     static class RateLimitInfo {
         int count = 0;
@@ -56,25 +57,23 @@ public class SimpleServer {
         server.createContext("/api/search", SimpleServer::handleSearch);
         server.createContext("/api/categories", SimpleServer::handleCategories);
         server.createContext("/api/suggestions", SimpleServer::handleSuggestions);
-        server.createContext("/api/semantic", SimpleServer::handleSemantic);
-        server.createContext("/api/tree", SimpleServer::handleTree);
         server.createContext("/api/subpages", SimpleServer::handleSubpages);
         server.createContext("/api/health", SimpleServer::handleHealth);
         
         server.start();
         
         System.out.println("╔═══════════════════════════════════════════════════╗");
-        System.out.println("║     🎪 EventFinder API Server (Crawler Ver)      ║");
+        System.out.println("║     🎪 EventFinder API Server v3.0               ║");
         System.out.println("╠═══════════════════════════════════════════════════╣");
         System.out.println("║  Status:  ✅ Running                              ║");
         System.out.println("║  Port:    " + PORT + "                                    ║");
         System.out.println("║  Crawler: ✅ Enabled                              ║");
         System.out.println("╠═══════════════════════════════════════════════════╣");
-        System.out.println("║  流程:                                            ║");
-        System.out.println("║  1️⃣  Google API → 取得大網頁 URL                  ║");
-        System.out.println("║  2️⃣  Crawler → 爬取內容 + 子連結                  ║");
-        System.out.println("║  3️⃣  計算分數 → 大網頁 + Σ子網頁                  ║");
-        System.out.println("║  4️⃣  排序顯示                                     ║");
+        System.out.println("║  APIs:                                            ║");
+        System.out.println("║  • /api/search       搜尋活動                     ║");
+        System.out.println("║  • /api/suggestions  關鍵字推薦 (Google 風格)     ║");
+        System.out.println("║  • /api/subpages     子網頁詳情                   ║");
+        System.out.println("║  • /api/categories   分類列表                     ║");
         System.out.println("╚═══════════════════════════════════════════════════╝");
     }
 
@@ -161,8 +160,10 @@ public class SimpleServer {
             }
             
             userProfile.setUserCity(city);
+            lastQuery = query;
+            lastCity = city;
             
-            // 搜尋（包含爬蟲）
+            // 搜尋
             List<PageNode> results = SearchEngine.search(query, userProfile);
             lastResults = results;
             
@@ -177,7 +178,7 @@ public class SimpleServer {
                 ? results.subList(start, end) 
                 : new ArrayList<>();
             
-            // 建構回應（包含子網頁資訊）
+            // 建構回應
             StringBuilder json = new StringBuilder();
             json.append("{\"success\":true,");
             json.append("\"query\":\"").append(escapeJson(query)).append("\",");
@@ -196,8 +197,7 @@ public class SimpleServer {
                 json.append("\"title\":\"").append(escapeJson(p.getTitle())).append("\",");
                 json.append("\"url\":\"").append(escapeJson(p.getUrl())).append("\",");
                 json.append("\"domain\":\"").append(escapeJson(p.getDomain())).append("\",");
-                json.append("\"score\":").append(p.getScore()).append(",");
-                json.append("\"subPagesScore\":").append(p.getSubPagesScore()).append(",");
+                json.append("\"score\":").append(String.format("%.1f", p.getTotalScore())).append(",");
                 json.append("\"subPageCount\":").append(p.getSubPageCount()).append(",");
                 json.append("\"city\":\"").append(escapeJson(p.getCity() != null ? p.getCity() : "")).append("\",");
                 json.append("\"eventDate\":\"").append(p.getEventDate() != null ? p.getEventDate().toString() : "").append("\",");
@@ -215,6 +215,39 @@ public class SimpleServer {
         }
     }
 
+    // ============ ★ 關鍵字推薦 API（Google 風格）============
+    private static void handleSuggestions(HttpExchange ex) throws IOException {
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            sendJson(ex, 200, "{}");
+            return;
+        }
+        
+        Map<String, String> params = parseQuery(ex.getRequestURI().getQuery());
+        String query = params.getOrDefault("query", lastQuery).trim();
+        String city = params.getOrDefault("city", lastCity).trim();
+        
+        // 取得推薦
+        List<String> suggestions = KeywordSuggester.suggest(query, city);
+        
+        // 建構 JSON
+        StringBuilder json = new StringBuilder();
+        json.append("{\"success\":true,");
+        json.append("\"query\":\"").append(escapeJson(query)).append("\",");
+        json.append("\"suggestions\":[");
+        
+        for (int i = 0; i < suggestions.size(); i++) {
+            if (i > 0) json.append(",");
+            String s = suggestions.get(i);
+            json.append("{");
+            json.append("\"text\":\"").append(escapeJson(s)).append("\",");
+            json.append("\"searchUrl\":\"/api/search?query=").append(escapeJson(s)).append("&city=").append(escapeJson(city)).append("\"");
+            json.append("}");
+        }
+        
+        json.append("]}");
+        sendJson(ex, 200, json.toString());
+    }
+
     // ============ 子網頁 API ============
     private static void handleSubpages(HttpExchange ex) throws IOException {
         if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
@@ -230,7 +263,6 @@ public class SimpleServer {
             return;
         }
         
-        // 找到對應的 PageNode
         PageNode targetPage = null;
         for (PageNode p : lastResults) {
             if (domain.equals(p.getDomain())) {
@@ -244,7 +276,6 @@ public class SimpleServer {
             return;
         }
         
-        // 建構回應
         StringBuilder json = new StringBuilder();
         json.append("{\"success\":true,");
         json.append("\"domain\":\"").append(escapeJson(domain)).append("\",");
@@ -298,95 +329,9 @@ public class SimpleServer {
         sendJson(ex, 200, json);
     }
 
-    // ============ 建議 API ============
-    private static void handleSuggestions(HttpExchange ex) throws IOException {
-        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
-            sendJson(ex, 200, "{}");
-            return;
-        }
-        sendJson(ex, 200, "{\"success\":true,\"suggestions\":[]}");
-    }
-
-    // ============ 語意分析 API ============
-    private static void handleSemantic(HttpExchange ex) throws IOException {
-        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
-            sendJson(ex, 200, "{}");
-            return;
-        }
-        
-        if (lastResults.isEmpty()) {
-            sendJson(ex, 200, "{\"success\":true,\"extractedKeywords\":[],\"suggestedKeywords\":[]}");
-            return;
-        }
-        
-        Map<String, Integer> wordCount = new HashMap<>();
-        for (PageNode p : lastResults) {
-            for (String token : p.getTokens()) {
-                if (token.length() >= 2) {
-                    wordCount.merge(token, 1, Integer::sum);
-                }
-            }
-        }
-        
-        List<String> extracted = wordCount.entrySet().stream()
-            .sorted((a, b) -> b.getValue() - a.getValue())
-            .limit(8)
-            .map(Map.Entry::getKey)
-            .toList();
-        
-        StringBuilder json = new StringBuilder("{\"success\":true,\"extractedKeywords\":[");
-        for (int i = 0; i < extracted.size(); i++) {
-            if (i > 0) json.append(",");
-            json.append("\"").append(escapeJson(extracted.get(i))).append("\"");
-        }
-        json.append("],\"suggestedKeywords\":[\"週末\",\"免費\",\"親子\"]}");
-        
-        sendJson(ex, 200, json.toString());
-    }
-
-    // ============ 樹狀結構 API ============
-    private static void handleTree(HttpExchange ex) throws IOException {
-        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
-            sendJson(ex, 200, "{}");
-            return;
-        }
-        
-        if (lastResults.isEmpty()) {
-            sendJson(ex, 200, "{\"success\":true,\"domains\":[]}");
-            return;
-        }
-        
-        Map<String, List<PageNode>> byDomain = new HashMap<>();
-        for (PageNode p : lastResults) {
-            String domain = p.getDomain();
-            if (domain != null && !domain.isEmpty()) {
-                byDomain.computeIfAbsent(domain, k -> new ArrayList<>()).add(p);
-            }
-        }
-        
-        StringBuilder json = new StringBuilder("{\"success\":true,\"domains\":[");
-        int i = 0;
-        for (Map.Entry<String, List<PageNode>> entry : byDomain.entrySet()) {
-            if (i++ > 0) json.append(",");
-            List<PageNode> pages = entry.getValue();
-            double totalScore = pages.stream().mapToDouble(PageNode::getScore).sum();
-            int totalSubPages = pages.stream().mapToInt(PageNode::getSubPageCount).sum();
-            
-            json.append("{");
-            json.append("\"domain\":\"").append(escapeJson(entry.getKey())).append("\",");
-            json.append("\"pageCount\":").append(pages.size()).append(",");
-            json.append("\"subPageCount\":").append(totalSubPages).append(",");
-            json.append("\"totalScore\":").append(String.format("%.1f", totalScore));
-            json.append("}");
-        }
-        json.append("]}");
-        
-        sendJson(ex, 200, json.toString());
-    }
-
     // ============ 健康檢查 ============
     private static void handleHealth(HttpExchange ex) throws IOException {
-        String json = "{\"success\":true,\"status\":\"healthy\",\"crawler\":\"enabled\"}";
+        String json = "{\"success\":true,\"status\":\"healthy\",\"version\":\"3.0\",\"crawler\":\"enabled\"}";
         sendJson(ex, 200, json);
     }
 }
