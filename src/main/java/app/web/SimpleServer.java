@@ -1,512 +1,392 @@
 package app.web;
 
-import java.io.IOException;
-import java.io.OutputStream;
-import java.io.PrintWriter;
-import java.io.StringWriter;
+import app.bl.*;
+import com.sun.net.httpserver.*;
+import java.io.*;
 import java.net.InetSocketAddress;
-import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
-
-import com.sun.net.httpserver.Headers;
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
-
-import app.bl.PageNode;
-import app.bl.SearchEngine;
-import app.bl.SemanticAnalyzer;
-import app.bl.Tree;
-import app.bl.UserProfile;
+import java.util.*;
+import java.util.concurrent.*;
+import java.time.Instant;
 
 /**
- * Enhanced REST API Server for EventFinder
- * 提供 JSON API 給 React 前端使用
+ * SimpleServer - 支援爬蟲和子網頁顯示
  */
 public class SimpleServer {
     
-    private static final String FRONTEND_DIR = "frontend/dist";
+    private static final int PORT = 8080;
+    private static final int THREAD_POOL_SIZE = 10;
     
-    // 搜尋建議關鍵字庫
-    private static final List<String> SUGGESTION_KEYWORDS = Arrays.asList(
-        "音樂 演唱會", "音樂節", "音樂會 古典", "音樂 爵士",
-        "展覽 藝術", "展覽 當代", "展覽 攝影", "展覽 免費",
-        "市集 文創", "市集 假日", "市集 農夫", "市集 手作",
-        "戶外 露營", "戶外 健行", "戶外 野餐", "戶外 登山",
-        "親子 兒童", "親子 DIY", "親子 免費", "親子 室內",
-        "運動 路跑", "運動 籃球", "運動 瑜伽", "運動 健身",
-        "美食 餐廳", "美食節", "美食 夜市", "美食 甜點",
-        "科技 展覽", "科技 講座", "科技 AI", "科技 創業",
-        "電影 首映", "電影 戶外", "電影 影展",
-        "講座 免費", "講座 職涯", "講座 理財",
-        "派對 音樂", "派對 聖誕", "派對 跨年",
-        "工作坊 手作", "工作坊 烘焙", "工作坊 繪畫",
-        "台北 活動", "台中 活動", "高雄 活動", "台南 活動",
-        "免費 活動", "週末 活動", "今日 活動"
-    );
+    // 限流設定
+    private static final int RATE_LIMIT_REQUESTS = 10;
+    private static final int RATE_LIMIT_WINDOW_SECONDS = 10;
+    private static final Map<String, RateLimitInfo> rateLimitMap = new ConcurrentHashMap<>();
     
-    // 儲存最近搜尋（簡易版，實際應用應該用資料庫）
-    private static final List<String> recentSearches = Collections.synchronizedList(new ArrayList<>());
+    // 快取設定
+    private static final int CACHE_TTL_SECONDS = 300;
+    private static final Map<String, CacheEntry> searchCache = new ConcurrentHashMap<>();
     
+    private static UserProfile userProfile = new UserProfile();
+    private static List<PageNode> lastResults = new ArrayList<>();
+    
+    static class RateLimitInfo {
+        int count = 0;
+        long windowStart = System.currentTimeMillis();
+    }
+    
+    static class CacheEntry {
+        String data;
+        long timestamp;
+        CacheEntry(String data) {
+            this.data = data;
+            this.timestamp = System.currentTimeMillis();
+        }
+        boolean isExpired() {
+            return System.currentTimeMillis() - timestamp > CACHE_TTL_SECONDS * 1000;
+        }
+    }
+
     public static void main(String[] args) throws Exception {
-        int port = 8080;
-        HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
+        HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
+        ExecutorService executor = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
+        server.setExecutor(executor);
         
         // API 路由
-        server.createContext("/api/search", SimpleServer::handleSearchAPI);
-        server.createContext("/api/tree", SimpleServer::handleTreeAPI);
-        server.createContext("/api/semantic", SimpleServer::handleSemanticAPI);
-        server.createContext("/api/categories", SimpleServer::handleCategoriesAPI);
-        server.createContext("/api/suggestions", SimpleServer::handleSuggestionsAPI);
-        server.createContext("/api/subpages", SimpleServer::handleSubpagesAPI);
-        server.createContext("/api/history", SimpleServer::handleHistoryAPI);
+        server.createContext("/api/search", SimpleServer::handleSearch);
+        server.createContext("/api/categories", SimpleServer::handleCategories);
+        server.createContext("/api/suggestions", SimpleServer::handleSuggestions);
+        server.createContext("/api/semantic", SimpleServer::handleSemantic);
+        server.createContext("/api/tree", SimpleServer::handleTree);
+        server.createContext("/api/subpages", SimpleServer::handleSubpages);
+        server.createContext("/api/health", SimpleServer::handleHealth);
         
-        // 靜態檔案服務
-        server.createContext("/", SimpleServer::handleStatic);
-        
-        server.setExecutor(null);
         server.start();
-        System.out.println("╔════════════════════════════════════════════╗");
-        System.out.println("║   🎪 EventFinder API Server Started!       ║");
-        System.out.println("║   Backend API: http://localhost:" + port + "        ║");
-        System.out.println("║   React Dev:   http://localhost:3000       ║");
-        System.out.println("╚════════════════════════════════════════════╝");
         
-        final Object lock = new Object();
-        synchronized (lock) {
-            try { lock.wait(); } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+        System.out.println("╔═══════════════════════════════════════════════════╗");
+        System.out.println("║     🎪 EventFinder API Server (Crawler Ver)      ║");
+        System.out.println("╠═══════════════════════════════════════════════════╣");
+        System.out.println("║  Status:  ✅ Running                              ║");
+        System.out.println("║  Port:    " + PORT + "                                    ║");
+        System.out.println("║  Crawler: ✅ Enabled                              ║");
+        System.out.println("╠═══════════════════════════════════════════════════╣");
+        System.out.println("║  流程:                                            ║");
+        System.out.println("║  1️⃣  Google API → 取得大網頁 URL                  ║");
+        System.out.println("║  2️⃣  Crawler → 爬取內容 + 子連結                  ║");
+        System.out.println("║  3️⃣  計算分數 → 大網頁 + Σ子網頁                  ║");
+        System.out.println("║  4️⃣  排序顯示                                     ║");
+        System.out.println("╚═══════════════════════════════════════════════════╝");
+    }
+
+    private static boolean checkRateLimit(HttpExchange ex) {
+        String clientIP = ex.getRemoteAddress().getAddress().getHostAddress();
+        long now = System.currentTimeMillis();
+        
+        RateLimitInfo info = rateLimitMap.computeIfAbsent(clientIP, k -> new RateLimitInfo());
+        
+        synchronized (info) {
+            if (now - info.windowStart > RATE_LIMIT_WINDOW_SECONDS * 1000) {
+                info.count = 0;
+                info.windowStart = now;
             }
+            info.count++;
+            return info.count <= RATE_LIMIT_REQUESTS;
         }
     }
 
-    // ==================== 搜尋 API ====================
-    private static void handleSearchAPI(HttpExchange ex) throws IOException {
-        setCorsHeaders(ex);
-        if ("OPTIONS".equals(ex.getRequestMethod())) {
-            ex.sendResponseHeaders(204, -1);
-            return;
-        }
-
-        String query = getQueryParam(ex.getRequestURI(), "query");
-        String city = getQueryParam(ex.getRequestURI(), "city");
-        String pageStr = getQueryParam(ex.getRequestURI(), "page");
-        int page = 1;
-        try { page = Integer.parseInt(pageStr); } catch (Exception e) {}
-        int pageSize = 10;
+    private static void sendJson(HttpExchange ex, int status, String json) throws IOException {
+        ex.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
+        ex.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
+        ex.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        ex.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type");
         
-        if (city == null || city.isEmpty()) city = "台北";
-        if (query == null || query.trim().isEmpty()) query = "音樂 活動";
-
-        // 記錄搜尋歷史
-        addToHistory(query);
-
-        UserProfile user = new UserProfile();
-        user.setUserCity(city);
-
-        try {
-            List<PageNode> allResults = SearchEngine.search(query, user);
-            
-            // 分頁處理
-            int totalResults = allResults.size();
-            int totalPages = (int) Math.ceil((double) totalResults / pageSize);
-            int startIdx = (page - 1) * pageSize;
-            int endIdx = Math.min(startIdx + pageSize, totalResults);
-            
-            List<PageNode> pagedResults = startIdx < totalResults 
-                ? allResults.subList(startIdx, endIdx) 
-                : Collections.emptyList();
-            
-            StringBuilder json = new StringBuilder();
-            json.append("{");
-            json.append("\"success\":true,");
-            json.append("\"query\":\"").append(escapeJson(query)).append("\",");
-            json.append("\"city\":\"").append(escapeJson(city)).append("\",");
-            json.append("\"totalCount\":").append(totalResults).append(",");
-            json.append("\"page\":").append(page).append(",");
-            json.append("\"totalPages\":").append(totalPages).append(",");
-            json.append("\"pageSize\":").append(pageSize).append(",");
-            json.append("\"results\":[");
-            
-            for (int i = 0; i < pagedResults.size(); i++) {
-                PageNode p = pagedResults.get(i);
-                int actualRank = startIdx + i + 1;
-                if (i > 0) json.append(",");
-                json.append("{");
-                json.append("\"rank\":").append(actualRank).append(",");
-                json.append("\"title\":\"").append(escapeJson(p.getTitle())).append("\",");
-                json.append("\"url\":\"").append(escapeJson(p.getUrl())).append("\",");
-                json.append("\"score\":").append(String.format("%.2f", p.getScore())).append(",");
-                json.append("\"city\":\"").append(escapeJson(p.getCity() != null ? p.getCity() : "")).append("\",");
-                json.append("\"domain\":\"").append(escapeJson(p.getDomain())).append("\",");
-                json.append("\"eventDate\":").append(p.getEventDate() != null ? "\"" + p.getEventDate() + "\"" : "null").append(",");
-                json.append("\"snippet\":\"").append(escapeJson(generateSnippet(p))).append("\"");
-                json.append("}");
-            }
-            
-            json.append("]}");
-            sendJson(ex, json.toString());
-            
-        } catch (Throwable t) {
-            StringWriter sw = new StringWriter();
-            t.printStackTrace(new PrintWriter(sw));
-            String errorMsg = sw.toString();
-            if (errorMsg.length() > 500) errorMsg = errorMsg.substring(0, 500);
-            String error = "{\"success\":false,\"error\":\"" + escapeJson(errorMsg) + "\"}";
-            sendJson(ex, error, 500);
-        }
-    }
-
-    // ==================== 搜尋建議 API ====================
-    private static void handleSuggestionsAPI(HttpExchange ex) throws IOException {
-        setCorsHeaders(ex);
-        if ("OPTIONS".equals(ex.getRequestMethod())) {
-            ex.sendResponseHeaders(204, -1);
-            return;
-        }
-
-        String query = getQueryParam(ex.getRequestURI(), "q");
-        if (query == null) query = "";
-        
-        final String searchTerm = query.toLowerCase();
-        
-        // 過濾匹配的建議
-        List<String> suggestions = SUGGESTION_KEYWORDS.stream()
-            .filter(kw -> kw.toLowerCase().contains(searchTerm))
-            .limit(8)
-            .collect(Collectors.toList());
-        
-        // 加入最近搜尋
-        List<String> recentMatches = recentSearches.stream()
-            .filter(s -> s.toLowerCase().contains(searchTerm))
-            .distinct()
-            .limit(3)
-            .collect(Collectors.toList());
-        
-        StringBuilder json = new StringBuilder();
-        json.append("{\"suggestions\":[");
-        
-        int count = 0;
-        // 先顯示最近搜尋
-        for (String recent : recentMatches) {
-            if (count > 0) json.append(",");
-            json.append("{\"text\":\"").append(escapeJson(recent)).append("\",\"type\":\"history\"}");
-            count++;
-        }
-        
-        // 再顯示建議關鍵字
-        for (String suggestion : suggestions) {
-            if (count >= 10) break;
-            if (recentMatches.contains(suggestion)) continue;
-            if (count > 0) json.append(",");
-            json.append("{\"text\":\"").append(escapeJson(suggestion)).append("\",\"type\":\"suggestion\"}");
-            count++;
-        }
-        
-        json.append("]}");
-        sendJson(ex, json.toString());
-    }
-
-    // ==================== 子網頁查詢 API ====================
-    private static void handleSubpagesAPI(HttpExchange ex) throws IOException {
-        setCorsHeaders(ex);
-        if ("OPTIONS".equals(ex.getRequestMethod())) {
-            ex.sendResponseHeaders(204, -1);
-            return;
-        }
-
-        String domain = getQueryParam(ex.getRequestURI(), "domain");
-        String query = getQueryParam(ex.getRequestURI(), "query");
-        
-        if (domain == null || domain.isEmpty()) {
-            sendJson(ex, "{\"success\":false,\"error\":\"需要提供 domain 參數\"}");
-            return;
-        }
-
-        Tree tree = SearchEngine.getLastSearchTree();
-        
-        StringBuilder json = new StringBuilder();
-        json.append("{");
-        
-        if (tree == null) {
-            json.append("\"success\":false,\"error\":\"請先進行搜尋\"");
-        } else {
-            List<PageNode> allPages = tree.getAllPagesSorted();
-            List<PageNode> domainPages = allPages.stream()
-                .filter(p -> p.getDomain().equalsIgnoreCase(domain))
-                .collect(Collectors.toList());
-            
-            json.append("\"success\":true,");
-            json.append("\"domain\":\"").append(escapeJson(domain)).append("\",");
-            json.append("\"count\":").append(domainPages.size()).append(",");
-            json.append("\"subpages\":[");
-            
-            for (int i = 0; i < domainPages.size(); i++) {
-                PageNode p = domainPages.get(i);
-                if (i > 0) json.append(",");
-                json.append("{");
-                json.append("\"title\":\"").append(escapeJson(p.getTitle())).append("\",");
-                json.append("\"url\":\"").append(escapeJson(p.getUrl())).append("\",");
-                json.append("\"score\":").append(String.format("%.2f", p.getScore())).append(",");
-                json.append("\"path\":\"").append(escapeJson(extractPath(p.getUrl()))).append("\"");
-                json.append("}");
-            }
-            
-            json.append("]");
-        }
-        
-        json.append("}");
-        sendJson(ex, json.toString());
-    }
-
-    // ==================== 搜尋歷史 API ====================
-    private static void handleHistoryAPI(HttpExchange ex) throws IOException {
-        setCorsHeaders(ex);
-        if ("OPTIONS".equals(ex.getRequestMethod())) {
-            ex.sendResponseHeaders(204, -1);
-            return;
-        }
-
-        StringBuilder json = new StringBuilder();
-        json.append("{\"history\":[");
-        
-        List<String> recent = new ArrayList<>(recentSearches);
-        Collections.reverse(recent);
-        
-        for (int i = 0; i < Math.min(10, recent.size()); i++) {
-            if (i > 0) json.append(",");
-            json.append("\"").append(escapeJson(recent.get(i))).append("\"");
-        }
-        
-        json.append("]}");
-        sendJson(ex, json.toString());
-    }
-
-    // ==================== 樹狀結構 API ====================
-    private static void handleTreeAPI(HttpExchange ex) throws IOException {
-        setCorsHeaders(ex);
-        if ("OPTIONS".equals(ex.getRequestMethod())) {
-            ex.sendResponseHeaders(204, -1);
-            return;
-        }
-
-        Tree tree = SearchEngine.getLastSearchTree();
-        StringBuilder json = new StringBuilder();
-        json.append("{");
-        
-        if (tree == null) {
-            json.append("\"success\":false,\"error\":\"請先進行搜尋\"");
-        } else {
-            json.append("\"success\":true,\"domains\":[");
-            
-            List<PageNode> pages = tree.getAllPagesSorted();
-            Map<String, List<PageNode>> byDomain = new LinkedHashMap<>();
-            for (PageNode p : pages) {
-                byDomain.computeIfAbsent(p.getDomain(), k -> new ArrayList<>()).add(p);
-            }
-            
-            int idx = 0;
-            for (Map.Entry<String, List<PageNode>> entry : byDomain.entrySet()) {
-                if (idx++ > 0) json.append(",");
-                double total = entry.getValue().stream().mapToDouble(PageNode::getScore).sum();
-                json.append("{\"domain\":\"").append(escapeJson(entry.getKey())).append("\",");
-                json.append("\"totalScore\":").append(String.format("%.2f", total)).append(",");
-                json.append("\"pageCount\":").append(entry.getValue().size()).append("}");
-            }
-            json.append("]");
-        }
-        
-        json.append("}");
-        sendJson(ex, json.toString());
-    }
-
-    // ==================== 語意分析 API ====================
-    private static void handleSemanticAPI(HttpExchange ex) throws IOException {
-        setCorsHeaders(ex);
-        if ("OPTIONS".equals(ex.getRequestMethod())) {
-            ex.sendResponseHeaders(204, -1);
-            return;
-        }
-
-        Tree tree = SearchEngine.getLastSearchTree();
-        StringBuilder json = new StringBuilder();
-        json.append("{");
-        
-        if (tree == null) {
-            json.append("\"success\":false,\"error\":\"請先進行搜尋\"");
-        } else {
-            List<PageNode> pages = tree.getAllPagesSorted();
-            List<String> extracted = SemanticAnalyzer.extractRelatedKeywords(pages);
-            List<String> suggested = SemanticAnalyzer.suggestNewKeywords(extracted);
-            
-            json.append("\"success\":true,\"extractedKeywords\":[");
-            for (int i = 0; i < extracted.size(); i++) {
-                if (i > 0) json.append(",");
-                json.append("\"").append(escapeJson(extracted.get(i))).append("\"");
-            }
-            json.append("],\"suggestedKeywords\":[");
-            int count = 0;
-            for (String kw : suggested) {
-                if (count > 0) json.append(",");
-                json.append("\"").append(escapeJson(kw)).append("\"");
-                if (++count >= 10) break;
-            }
-            json.append("]");
-        }
-        
-        json.append("}");
-        sendJson(ex, json.toString());
-    }
-
-    // ==================== 分類 API ====================
-    private static void handleCategoriesAPI(HttpExchange ex) throws IOException {
-        setCorsHeaders(ex);
-        if ("OPTIONS".equals(ex.getRequestMethod())) {
-            ex.sendResponseHeaders(204, -1);
-            return;
-        }
-
-        String json = "{\"categories\":[" +
-            "{\"id\":\"music\",\"name\":\"音樂\",\"icon\":\"🎵\",\"query\":\"音樂 演唱會\",\"color\":\"#ff6b6b\"}," +
-            "{\"id\":\"art\",\"name\":\"展覽\",\"icon\":\"🎨\",\"query\":\"展覽 藝術\",\"color\":\"#4ecdc4\"}," +
-            "{\"id\":\"market\",\"name\":\"市集\",\"icon\":\"🛍️\",\"query\":\"市集 文創\",\"color\":\"#ffe66d\"}," +
-            "{\"id\":\"outdoor\",\"name\":\"戶外\",\"icon\":\"⛺\",\"query\":\"戶外 露營\",\"color\":\"#95e1d3\"}," +
-            "{\"id\":\"family\",\"name\":\"親子\",\"icon\":\"👨‍👩‍👧\",\"query\":\"親子 兒童\",\"color\":\"#f38181\"}," +
-            "{\"id\":\"sports\",\"name\":\"運動\",\"icon\":\"⚽\",\"query\":\"運動 賽事\",\"color\":\"#aa96da\"}," +
-            "{\"id\":\"food\",\"name\":\"美食\",\"icon\":\"🍜\",\"query\":\"美食 節\",\"color\":\"#fcbad3\"}," +
-            "{\"id\":\"tech\",\"name\":\"科技\",\"icon\":\"💻\",\"query\":\"科技 展覽\",\"color\":\"#a8d8ea\"}" +
-            "]}";
-        sendJson(ex, json);
-    }
-
-    // ==================== 靜態檔案 ====================
-    private static void handleStatic(HttpExchange ex) throws IOException {
-        String path = ex.getRequestURI().getPath();
-        if (path.equals("/")) path = "/index.html";
-        
-        Path filePath = Paths.get(FRONTEND_DIR + path);
-        if (!Files.exists(filePath)) {
-            filePath = Paths.get(FRONTEND_DIR + "/index.html");
-        }
-        
-        if (Files.exists(filePath)) {
-            byte[] bytes = Files.readAllBytes(filePath);
-            Headers h = ex.getResponseHeaders();
-            h.set("Content-Type", getContentType(path));
-            ex.sendResponseHeaders(200, bytes.length);
-            try (OutputStream os = ex.getResponseBody()) { os.write(bytes); }
-        } else {
-            String html = "<!DOCTYPE html><html><head><meta charset='utf-8'></head>" +
-                "<body style='font-family:system-ui;padding:40px;background:#0a0a0f;color:#fff;text-align:center'>" +
-                "<h1>🎪 EventFinder API</h1>" +
-                "<p style='color:#888'>後端已啟動！請啟動 React 前端：</p>" +
-                "<pre style='background:#1a1a2e;padding:20px;border-radius:8px;text-align:left;display:inline-block'>" +
-                "cd frontend\nnpm install\nnpm run dev</pre>" +
-                "<p style='color:#888;margin-top:20px'>然後訪問 <a href='http://localhost:3000' style='color:#ff6b6b'>http://localhost:3000</a></p>" +
-                "</body></html>";
-            sendHtml(ex, html);
-        }
-    }
-
-    // ==================== 工具方法 ====================
-    
-    private static void addToHistory(String query) {
-        recentSearches.removeIf(s -> s.equalsIgnoreCase(query));
-        recentSearches.add(query);
-        while (recentSearches.size() > 50) {
-            recentSearches.remove(0);
-        }
-    }
-    
-    private static String generateSnippet(PageNode p) {
-        String title = p.getTitle() != null ? p.getTitle() : "";
-        String city = p.getCity() != null ? p.getCity() : "";
-        String domain = p.getDomain() != null ? p.getDomain() : "";
-        return String.format("在 %s 舉辦的活動，來源：%s", city.isEmpty() ? "台灣" : city, domain);
-    }
-    
-    private static String extractPath(String url) {
-        try {
-            URI uri = new URI(url);
-            String path = uri.getPath();
-            return path != null && !path.isEmpty() ? path : "/";
-        } catch (Exception e) {
-            return "/";
-        }
-    }
-
-    private static void setCorsHeaders(HttpExchange ex) {
-        Headers h = ex.getResponseHeaders();
-        h.set("Access-Control-Allow-Origin", "*");
-        h.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        h.set("Access-Control-Allow-Headers", "Content-Type");
-    }
-
-    private static String getQueryParam(URI uri, String name) {
-        String raw = uri.getRawQuery();
-        if (raw == null) return null;
-        for (String p : raw.split("&")) {
-            int eq = p.indexOf('=');
-            if (eq < 0) continue;
-            String k = urlDecode(p.substring(0, eq));
-            String v = urlDecode(p.substring(eq + 1));
-            if (name.equals(k)) return v;
-        }
-        return null;
-    }
-
-    private static String urlDecode(String s) {
-        try { return URLDecoder.decode(s, StandardCharsets.UTF_8.name()); } 
-        catch (Exception e) { return s; }
-    }
-
-    private static void sendJson(HttpExchange ex, String json) throws IOException {
-        sendJson(ex, json, 200);
-    }
-
-    private static void sendJson(HttpExchange ex, String json, int code) throws IOException {
         byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
-        Headers h = ex.getResponseHeaders();
-        h.set("Content-Type", "application/json; charset=utf-8");
-        ex.sendResponseHeaders(code, bytes.length);
-        try (OutputStream os = ex.getResponseBody()) { os.write(bytes); }
+        ex.sendResponseHeaders(status, bytes.length);
+        try (OutputStream os = ex.getResponseBody()) {
+            os.write(bytes);
+        }
     }
-
-    private static void sendHtml(HttpExchange ex, String html) throws IOException {
-        byte[] bytes = html.getBytes(StandardCharsets.UTF_8);
-        Headers h = ex.getResponseHeaders();
-        h.set("Content-Type", "text/html; charset=utf-8");
-        ex.sendResponseHeaders(200, bytes.length);
-        try (OutputStream os = ex.getResponseBody()) { os.write(bytes); }
+    
+    private static void sendError(HttpExchange ex, int status, String message) throws IOException {
+        String json = String.format("{\"success\":false,\"error\":\"%s\"}", escapeJson(message));
+        sendJson(ex, status, json);
     }
-
+    
     private static String escapeJson(String s) {
         if (s == null) return "";
         return s.replace("\\", "\\\\")
                 .replace("\"", "\\\"")
                 .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
+                .replace("\r", "\\r");
+    }
+    
+    private static Map<String, String> parseQuery(String query) {
+        Map<String, String> params = new HashMap<>();
+        if (query == null || query.isEmpty()) return params;
+        for (String pair : query.split("&")) {
+            String[] kv = pair.split("=", 2);
+            if (kv.length == 2) {
+                try {
+                    params.put(kv[0], URLDecoder.decode(kv[1], StandardCharsets.UTF_8));
+                } catch (Exception e) {
+                    params.put(kv[0], kv[1]);
+                }
+            }
+        }
+        return params;
     }
 
-    private static String getContentType(String path) {
-        if (path.endsWith(".html")) return "text/html; charset=utf-8";
-        if (path.endsWith(".css")) return "text/css; charset=utf-8";
-        if (path.endsWith(".js")) return "application/javascript; charset=utf-8";
-        if (path.endsWith(".json")) return "application/json; charset=utf-8";
-        if (path.endsWith(".png")) return "image/png";
-        if (path.endsWith(".svg")) return "image/svg+xml";
-        if (path.endsWith(".ico")) return "image/x-icon";
-        return "text/plain; charset=utf-8";
+    // ============ 搜尋 API ============
+    private static void handleSearch(HttpExchange ex) throws IOException {
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            sendJson(ex, 200, "{}");
+            return;
+        }
+        
+        if (!checkRateLimit(ex)) {
+            sendError(ex, 429, "請求太頻繁，請稍後再試");
+            return;
+        }
+        
+        try {
+            Map<String, String> params = parseQuery(ex.getRequestURI().getQuery());
+            String query = params.getOrDefault("query", "").trim();
+            String city = params.getOrDefault("city", "台北").trim();
+            int page = 1;
+            try { page = Integer.parseInt(params.getOrDefault("page", "1")); } catch (Exception e) {}
+            
+            if (query.isEmpty() || query.length() < 2) {
+                sendError(ex, 400, "請輸入至少 2 個字的關鍵字");
+                return;
+            }
+            
+            userProfile.setUserCity(city);
+            
+            // 搜尋（包含爬蟲）
+            List<PageNode> results = SearchEngine.search(query, userProfile);
+            lastResults = results;
+            
+            // 分頁
+            int pageSize = 10;
+            int totalCount = results.size();
+            int totalPages = (int) Math.ceil((double) totalCount / pageSize);
+            int start = (page - 1) * pageSize;
+            int end = Math.min(start + pageSize, totalCount);
+            
+            List<PageNode> pageResults = (start < totalCount) 
+                ? results.subList(start, end) 
+                : new ArrayList<>();
+            
+            // 建構回應（包含子網頁資訊）
+            StringBuilder json = new StringBuilder();
+            json.append("{\"success\":true,");
+            json.append("\"query\":\"").append(escapeJson(query)).append("\",");
+            json.append("\"city\":\"").append(escapeJson(city)).append("\",");
+            json.append("\"page\":").append(page).append(",");
+            json.append("\"totalCount\":").append(totalCount).append(",");
+            json.append("\"totalPages\":").append(totalPages).append(",");
+            json.append("\"results\":[");
+            
+            int rank = start + 1;
+            for (int i = 0; i < pageResults.size(); i++) {
+                PageNode p = pageResults.get(i);
+                if (i > 0) json.append(",");
+                json.append("{");
+                json.append("\"rank\":").append(rank++).append(",");
+                json.append("\"title\":\"").append(escapeJson(p.getTitle())).append("\",");
+                json.append("\"url\":\"").append(escapeJson(p.getUrl())).append("\",");
+                json.append("\"domain\":\"").append(escapeJson(p.getDomain())).append("\",");
+                json.append("\"score\":").append(p.getScore()).append(",");
+                json.append("\"subPagesScore\":").append(p.getSubPagesScore()).append(",");
+                json.append("\"subPageCount\":").append(p.getSubPageCount()).append(",");
+                json.append("\"city\":\"").append(escapeJson(p.getCity() != null ? p.getCity() : "")).append("\",");
+                json.append("\"eventDate\":\"").append(p.getEventDate() != null ? p.getEventDate().toString() : "").append("\",");
+                json.append("\"crawled\":").append(p.isCrawled());
+                json.append("}");
+            }
+            
+            json.append("]}");
+            sendJson(ex, 200, json.toString());
+            
+        } catch (Exception e) {
+            System.err.println("[ERROR] " + e.getMessage());
+            e.printStackTrace();
+            sendError(ex, 500, "搜尋發生錯誤");
+        }
+    }
+
+    // ============ 子網頁 API ============
+    private static void handleSubpages(HttpExchange ex) throws IOException {
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            sendJson(ex, 200, "{}");
+            return;
+        }
+        
+        Map<String, String> params = parseQuery(ex.getRequestURI().getQuery());
+        String domain = params.getOrDefault("domain", "").trim();
+        
+        if (domain.isEmpty()) {
+            sendError(ex, 400, "請提供 domain");
+            return;
+        }
+        
+        // 找到對應的 PageNode
+        PageNode targetPage = null;
+        for (PageNode p : lastResults) {
+            if (domain.equals(p.getDomain())) {
+                targetPage = p;
+                break;
+            }
+        }
+        
+        if (targetPage == null) {
+            sendJson(ex, 200, "{\"success\":true,\"domain\":\"" + escapeJson(domain) + "\",\"count\":0,\"subpages\":[]}");
+            return;
+        }
+        
+        // 建構回應
+        StringBuilder json = new StringBuilder();
+        json.append("{\"success\":true,");
+        json.append("\"domain\":\"").append(escapeJson(domain)).append("\",");
+        json.append("\"mainPage\":{");
+        json.append("\"title\":\"").append(escapeJson(targetPage.getTitle())).append("\",");
+        json.append("\"url\":\"").append(escapeJson(targetPage.getUrl())).append("\",");
+        json.append("\"score\":").append(targetPage.getScore());
+        json.append("},");
+        json.append("\"count\":").append(targetPage.getSubPageCount()).append(",");
+        json.append("\"subpages\":[");
+        
+        List<SubPageNode> subPages = targetPage.getSubPages();
+        for (int i = 0; i < subPages.size(); i++) {
+            SubPageNode sub = subPages.get(i);
+            if (i > 0) json.append(",");
+            json.append("{");
+            json.append("\"title\":\"").append(escapeJson(sub.getTitle())).append("\",");
+            json.append("\"url\":\"").append(escapeJson(sub.getUrl())).append("\",");
+            json.append("\"score\":").append(sub.getScore()).append(",");
+            json.append("\"path\":\"").append(escapeJson(extractPath(sub.getUrl()))).append("\"");
+            json.append("}");
+        }
+        
+        json.append("]}");
+        sendJson(ex, 200, json.toString());
+    }
+    
+    private static String extractPath(String url) {
+        if (url == null) return "/";
+        int idx = url.indexOf("://");
+        if (idx >= 0) url = url.substring(idx + 3);
+        idx = url.indexOf('/');
+        return idx >= 0 ? url.substring(idx) : "/";
+    }
+
+    // ============ 分類 API ============
+    private static void handleCategories(HttpExchange ex) throws IOException {
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            sendJson(ex, 200, "{}");
+            return;
+        }
+        
+        String json = "{\"success\":true,\"categories\":["
+            + "{\"id\":\"music\",\"name\":\"音樂\",\"icon\":\"🎵\",\"query\":\"演唱會 音樂會\",\"color\":\"255,107,107\"},"
+            + "{\"id\":\"art\",\"name\":\"展覽\",\"icon\":\"🎨\",\"query\":\"展覽 藝術\",\"color\":\"78,205,196\"},"
+            + "{\"id\":\"market\",\"name\":\"市集\",\"icon\":\"🛍️\",\"query\":\"市集 文創\",\"color\":\"255,230,109\"},"
+            + "{\"id\":\"outdoor\",\"name\":\"戶外\",\"icon\":\"⛰️\",\"query\":\"戶外 野餐\",\"color\":\"129,199,132\"},"
+            + "{\"id\":\"family\",\"name\":\"親子\",\"icon\":\"👨‍👩‍👧\",\"query\":\"親子 兒童\",\"color\":\"186,104,200\"},"
+            + "{\"id\":\"sports\",\"name\":\"運動\",\"icon\":\"🏃\",\"query\":\"路跑 馬拉松\",\"color\":\"79,195,247\"}"
+            + "]}";
+        sendJson(ex, 200, json);
+    }
+
+    // ============ 建議 API ============
+    private static void handleSuggestions(HttpExchange ex) throws IOException {
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            sendJson(ex, 200, "{}");
+            return;
+        }
+        sendJson(ex, 200, "{\"success\":true,\"suggestions\":[]}");
+    }
+
+    // ============ 語意分析 API ============
+    private static void handleSemantic(HttpExchange ex) throws IOException {
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            sendJson(ex, 200, "{}");
+            return;
+        }
+        
+        if (lastResults.isEmpty()) {
+            sendJson(ex, 200, "{\"success\":true,\"extractedKeywords\":[],\"suggestedKeywords\":[]}");
+            return;
+        }
+        
+        Map<String, Integer> wordCount = new HashMap<>();
+        for (PageNode p : lastResults) {
+            for (String token : p.getTokens()) {
+                if (token.length() >= 2) {
+                    wordCount.merge(token, 1, Integer::sum);
+                }
+            }
+        }
+        
+        List<String> extracted = wordCount.entrySet().stream()
+            .sorted((a, b) -> b.getValue() - a.getValue())
+            .limit(8)
+            .map(Map.Entry::getKey)
+            .toList();
+        
+        StringBuilder json = new StringBuilder("{\"success\":true,\"extractedKeywords\":[");
+        for (int i = 0; i < extracted.size(); i++) {
+            if (i > 0) json.append(",");
+            json.append("\"").append(escapeJson(extracted.get(i))).append("\"");
+        }
+        json.append("],\"suggestedKeywords\":[\"週末\",\"免費\",\"親子\"]}");
+        
+        sendJson(ex, 200, json.toString());
+    }
+
+    // ============ 樹狀結構 API ============
+    private static void handleTree(HttpExchange ex) throws IOException {
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            sendJson(ex, 200, "{}");
+            return;
+        }
+        
+        if (lastResults.isEmpty()) {
+            sendJson(ex, 200, "{\"success\":true,\"domains\":[]}");
+            return;
+        }
+        
+        Map<String, List<PageNode>> byDomain = new HashMap<>();
+        for (PageNode p : lastResults) {
+            String domain = p.getDomain();
+            if (domain != null && !domain.isEmpty()) {
+                byDomain.computeIfAbsent(domain, k -> new ArrayList<>()).add(p);
+            }
+        }
+        
+        StringBuilder json = new StringBuilder("{\"success\":true,\"domains\":[");
+        int i = 0;
+        for (Map.Entry<String, List<PageNode>> entry : byDomain.entrySet()) {
+            if (i++ > 0) json.append(",");
+            List<PageNode> pages = entry.getValue();
+            double totalScore = pages.stream().mapToDouble(PageNode::getScore).sum();
+            int totalSubPages = pages.stream().mapToInt(PageNode::getSubPageCount).sum();
+            
+            json.append("{");
+            json.append("\"domain\":\"").append(escapeJson(entry.getKey())).append("\",");
+            json.append("\"pageCount\":").append(pages.size()).append(",");
+            json.append("\"subPageCount\":").append(totalSubPages).append(",");
+            json.append("\"totalScore\":").append(String.format("%.1f", totalScore));
+            json.append("}");
+        }
+        json.append("]}");
+        
+        sendJson(ex, 200, json.toString());
+    }
+
+    // ============ 健康檢查 ============
+    private static void handleHealth(HttpExchange ex) throws IOException {
+        String json = "{\"success\":true,\"status\":\"healthy\",\"crawler\":\"enabled\"}";
+        sendJson(ex, 200, json);
     }
 }
