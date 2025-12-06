@@ -1,8 +1,12 @@
 package app.bl;
 
-import java.util.*;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * RankCalculator v2.0 - 打敗 Google 的排名演算法
@@ -76,15 +80,18 @@ public class RankCalculator {
     );
     private static final double SHOPPING_PENALTY = 0.2;
 
-    // ============ 時間新鮮度（核心差異化）============
-    private static final double DATE_TODAY_BOOST = 2.5;        // 今天！
-    private static final double DATE_TOMORROW_BOOST = 2.3;     // 明天
-    private static final double DATE_THIS_WEEK_BOOST = 2.0;    // 本週
-    private static final double DATE_NEXT_WEEK_BOOST = 1.8;    // 下週
-    private static final double DATE_THIS_MONTH_BOOST = 1.5;   // 本月
+        // ============ 時間新鮮度（核心差異化）============
+    // 近期活動一樣給高加權，但不再把沒有日期 / 過期打到幾乎 0 分
+    private static final double DATE_TODAY_BOOST = 2.5;           // 今天
+    private static final double DATE_TOMORROW_BOOST = 2.3;        // 明天
+    private static final double DATE_THIS_WEEK_BOOST = 2.0;       // 本週
+    private static final double DATE_NEXT_WEEK_BOOST = 1.8;       // 下週
+    private static final double DATE_THIS_MONTH_BOOST = 1.5;      // 本月
     private static final double DATE_WITHIN_3MONTHS_BOOST = 1.2;  // 三個月內
-    private static final double NO_DATE_PENALTY = 0.6;         // 無日期懲罰加重
-    private static final double EXPIRED_PENALTY = 0.02;        // 已過期幾乎不顯示
+
+    // 沒寫日期 → 只小扣；已過期 → 還是有分，但排在未來活動後面
+    private static final double NO_DATE_PENALTY = 0.9;            // 無日期：輕微懲罰
+    private static final double EXPIRED_PENALTY = 0.7;            // 已過期：中度懲罰
 
     // ============ 內容品質 ============
     private static final Set<String> APPLICATION_KEYWORDS = Set.of(
@@ -371,20 +378,35 @@ public class RankCalculator {
         return Math.max(0.3, Math.min(bonus, 3.0));  // 限制範圍
     }
     
+    /**
+ * 根據活動日期計算新鮮度加權
+ * - 未來越近分數越高
+ * - 沒有日期：給 NO_DATE_PENALTY（0.9）
+ * - 已過期：給 EXPIRED_PENALTY（0.7），仍保留一定分數
+ */
     private static double calculateFreshnessBoost(LocalDate eventDate, LocalDate today) {
-        if (eventDate == null) return NO_DATE_PENALTY;
-        
+        // 沒有日期：代表從標題抓不到時間，只稍微扣分即可
+        if (eventDate == null) {
+            return NO_DATE_PENALTY;
+        }
+
         long daysUntil = ChronoUnit.DAYS.between(today, eventDate);
-        
-        if (daysUntil < 0) return EXPIRED_PENALTY;           // 已過期
-        if (daysUntil == 0) return DATE_TODAY_BOOST;         // 今天！
-        if (daysUntil == 1) return DATE_TOMORROW_BOOST;      // 明天
-        if (daysUntil <= 7) return DATE_THIS_WEEK_BOOST;     // 本週
-        if (daysUntil <= 14) return DATE_NEXT_WEEK_BOOST;    // 下週
-        if (daysUntil <= 30) return DATE_THIS_MONTH_BOOST;   // 本月
-        if (daysUntil <= 90) return DATE_WITHIN_3MONTHS_BOOST;  // 三個月內
-        
-        return 1.0;  // 更久以後
+
+        // 已過期：仍給分，但會排在近期活動後面
+        if (daysUntil < 0) {
+            return EXPIRED_PENALTY;
+        }
+
+        // 近期加權
+        if (daysUntil == 0) return DATE_TODAY_BOOST;             // 今天
+        if (daysUntil == 1) return DATE_TOMORROW_BOOST;          // 明天
+        if (daysUntil <= 7) return DATE_THIS_WEEK_BOOST;         // 本週
+        if (daysUntil <= 14) return DATE_NEXT_WEEK_BOOST;        // 下週
+        if (daysUntil <= 30) return DATE_THIS_MONTH_BOOST;       // 本月
+        if (daysUntil <= 90) return DATE_WITHIN_3MONTHS_BOOST;   // 三個月內
+
+        // 超過三個月以後：視為普通，不特別加權
+        return 1.0;
     }
     
     private static double calculateRegionBoost(String eventCity, String userCity) {
