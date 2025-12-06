@@ -1,14 +1,17 @@
 package app.bl;
 
 import java.time.LocalDate;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
- * PageNode - 網頁節點（支援子網頁）
+ * PageNode v2.0 - 網頁節點（支援子網頁）
  * 
- * 改進：
- * - 儲存子網頁列表
- * - 計算總分 = 自身分數 + Σ子網頁分數
+ * 更新：
+ * - 新增 setTotalScore() setter
+ * - 新增 setEventDate() setter
  */
 public class PageNode {
     
@@ -23,13 +26,13 @@ public class PageNode {
     // 分數相關
     private double score = 0.0;           // 自身分數
     private double subPagesScore = 0.0;   // 子網頁分數總和
-    private double totalScore = 0.0;      // 總分 = 自身 + 子網頁
+    private double totalScore = 0.0;      // 總分
     
     // 子網頁
     private List<SubPageNode> subPages = new ArrayList<>();
-    private boolean crawled = false;      // 是否已爬取子網頁
+    private boolean crawled = false;
     
-    // 內容（從爬蟲取得）
+    // 內容
     private String textContent = "";
 
     // ============ 建構子 ============
@@ -51,23 +54,14 @@ public class PageNode {
     
     // ============ 子網頁相關 ============
     
-    /**
-     * 新增子網頁
-     */
     public void addSubPage(SubPageNode subPage) {
         this.subPages.add(subPage);
     }
     
-    /**
-     * 取得所有子網頁
-     */
     public List<SubPageNode> getSubPages() {
         return subPages;
     }
     
-    /**
-     * 計算子網頁分數總和
-     */
     public void calculateSubPagesScore() {
         this.subPagesScore = 0.0;
         for (SubPageNode sub : subPages) {
@@ -75,45 +69,37 @@ public class PageNode {
         }
     }
     
-    /**
-     * 計算總分 = 自身分數 + 子網頁分數（加權）
-     * 
-     * 子網頁分數權重較低（0.3），因為主要還是看大網頁
-     */
     public void calculateTotalScore() {
         this.totalScore = this.score + (this.subPagesScore * 0.3);
     }
     
-    /**
-     * 取得總分
-     */
     public double getTotalScore() {
         return totalScore;
     }
     
+    // ★ 新增 setter
+    public void setTotalScore(double totalScore) {
+        this.totalScore = totalScore;
+    }
+    
     // ============ 分數計算輔助 ============
     
-    /**
-     * 計算關鍵字接近度獎勵
-     */
     public double calculateProximityBonus(List<String> queryTokens) {
         if (queryTokens == null || queryTokens.size() < 2) return 1.0;
         
         String content = (title + " " + textContent).toLowerCase();
         double bonus = 1.0;
         
-        // 檢查關鍵字是否相鄰出現
         for (int i = 0; i < queryTokens.size() - 1; i++) {
             String t1 = queryTokens.get(i).toLowerCase();
             String t2 = queryTokens.get(i + 1).toLowerCase();
             
-            // 相鄰出現
             if (content.contains(t1 + t2) || content.contains(t1 + " " + t2)) {
                 bonus += 0.2;
             }
         }
         
-        return Math.min(bonus, 2.0);  // 最多 2 倍
+        return Math.min(bonus, 2.0);
     }
     
     // ============ Getters & Setters ============
@@ -131,7 +117,11 @@ public class PageNode {
     public void setCity(String city) { this.city = city; }
     
     public LocalDate getEventDate() { return eventDate; }
-    public void setEventDate(LocalDate eventDate) { this.eventDate = eventDate; }
+    
+    // ★ 新增 setter
+    public void setEventDate(LocalDate eventDate) { 
+        this.eventDate = eventDate; 
+    }
     
     public Map<Keyword, Integer> tf() { return tf; }
     public Map<Keyword, Integer> getTf() { return tf; }
@@ -152,16 +142,13 @@ public class PageNode {
     public boolean isCrawled() { return crawled; }
     public void setCrawled(boolean crawled) { this.crawled = crawled; }
     
-    /**
-     * 取得子網頁數量
-     */
     public int getSubPageCount() {
         return subPages.size();
     }
     
     @Override
     public String toString() {
-        return String.format("PageNode[%.1f (self) + %.1f (sub) = %.1f]: %s (%d subpages)", 
-            score, subPagesScore, totalScore, title, subPages.size());
+        return String.format("PageNode[%.1f]: %s (%d subpages)", 
+            totalScore, title, subPages.size());
     }
 }
