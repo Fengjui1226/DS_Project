@@ -359,31 +359,78 @@ public class SearchEngine {
         return PageNode.of(r.link, r.title, tf, eventDate, city, domain, tokensCopy);
     }
 
+    /**
+     * 新版 refineQuery：
+     * 1. 沒有活動關鍵字 → 幫忙加一組 (活動 / 展覽 / 演唱會 / 音樂會 / 市集)
+     * 2. 有活動關鍵字 → 只針對那個類別做同義詞擴充（不用再塞一大坨）
+     * 3. 使用者沒寫年份 → 才補「今年 / 明年」
+     * 4. 查詢裡沒城市也沒台灣 → 才補「台灣」
+     * 5. 排除申請 / 辦法 / 徵選 / 招生這類非活動頁
+     */
     private static String refineQuery(String query) {
         String q = (query == null) ? "" : query.trim();
         if (q.isEmpty()) return q;
 
         String lower = q.toLowerCase();
+
+        // 有沒有城市關鍵字
         boolean hasCity = CITY_ALIASES.keySet().stream()
                 .anyMatch(alias -> lower.contains(alias.toLowerCase()));
+
+        // 有沒有活動類關鍵字
         boolean hasEventWord = EVENT_TERMS.stream()
                 .anyMatch(term -> lower.contains(term.toLowerCase()));
 
-        if (hasCity && !hasEventWord) {
-            q += " 活動 OR 展覽 OR 演唱會 OR 市集";
+        // 有沒有年份（西元 / 民國 / 今年 / 明年）
+        boolean hasYear =
+                lower.matches(".*20\\d{2}.*") ||        // 2025
+                lower.matches(".*1\\d{2}年.*") ||       // 114年
+                lower.contains("今年") ||
+                lower.contains("明年");
+
+        // 有沒有出現「台灣 / Taiwan」
+        boolean hasTaiwan =
+                lower.contains("台灣") ||
+                lower.contains("臺灣") ||
+                lower.contains("taiwan");
+
+        StringBuilder sb = new StringBuilder(q);
+
+        // 1️⃣ 沒有活動詞 → 幫忙加一組大方向活動詞
+        if (!hasEventWord) {
+            sb.append(" (活動 OR 展覽 OR 演唱會 OR 音樂會 OR 市集)");
+        } else {
+            // 2️⃣ 已經有活動詞 → 針對那個類別做同義詞擴充（只擴一種，避免太肥）
+            for (Map.Entry<String, List<String>> e : CATEGORY_EXPANSIONS.entrySet()) {
+                String key = e.getKey().toLowerCase();
+                if (lower.contains(key)) {
+                    sb.append(" (").append(e.getKey());
+                    for (String alias : e.getValue()) {
+                        if (!lower.contains(alias.toLowerCase())) {
+                            sb.append(" OR ").append(alias);
+                        }
+                    }
+                    sb.append(")");
+                    break;
+                }
+            }
         }
 
-        if (!lower.matches(".*20\\d{2}.*")) {
+        // 3️⃣ 沒有年份 → 補「今年 / 明年」效果：year OR year+1
+        if (!hasYear) {
             int year = LocalDate.now().getYear();
-            q += " " + year + " OR " + (year + 1);
+            sb.append(" ").append(year).append(" OR ").append(year + 1);
         }
 
-        if (!lower.contains("台灣") && !lower.contains("臺灣")) {
-            q += " 台灣";
+        // 4️⃣ 沒有城市也沒有台灣 → 補「台灣」避免飄到國外
+        if (!hasTaiwan && !hasCity) {
+            sb.append(" 台灣");
         }
 
-        q += " -申請辦法 -徵選 -補助 -招生 -履歷 -課程簡章";
-        return q;
+        // 5️⃣ 排除非活動頁
+        sb.append(" -申請 -申請辦法 -徵選 -補助 -招標 -採購 -招生 -簡章 -課程簡章 -履歷");
+
+        return sb.toString();
     }
 
     private static List<String> parseQueryTokens(String query) {
@@ -582,7 +629,7 @@ public class SearchEngine {
         double range = max - min;
         if (range < 1e-6) range = 1.0;
 
-        // 再把調整後的分數 normalize 回 10–100 区間
+        // 再把調整後的分數 normalize 回 10–100 區間
         for (PageNode p : pages) {
             double s = newScores.get(p);
             double normalized = ((s - min) / range) * 90 + 10;
