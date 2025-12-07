@@ -120,20 +120,7 @@ public class SearchEngine {
         }
         System.out.println("[Pages] 建立 " + pages.size() + " 個頁面節點");
 
-        // 🆕 嚴格城市過濾：使用者有選城市 → 只保留同城市，其它全部丟掉
-        if (userCity != null && !userCity.isEmpty()) {
-            String finalCity = normalizeCity(userCity);
-            List<PageNode> filtered = new ArrayList<>();
-            for (PageNode p : pages) {
-                String c = normalizeCity(p.getCity());
-                if (c != null && c.equals(finalCity)) {
-                    filtered.add(p);
-                }
-            }
-            System.out.println("[City Filter] 原始 " + pages.size() +
-                    " 筆 → 保留同城市 " + filtered.size() + " 筆（嚴格模式：沒城市/全台/外縣市全部捨棄）");
-            pages = filtered;
-        }
+        // =========（暫時不在這裡過濾城市，要等爬完內文再說）=========
 
         // ================== Step 3: 並行爬取 ==================
         if (ENABLE_CRAWLING && !pages.isEmpty()) {
@@ -145,6 +132,22 @@ public class SearchEngine {
             } else {
                 System.out.println("\n[Step 3] 跳過爬取（時間不足）");
             }
+        }
+
+        // 🆕 3.2：嚴格城市過濾（用「標題＋內文」更新後的 city 來判斷）
+        if (userCity != null && !userCity.isEmpty()) {
+            String finalCity = normalizeCity(userCity);
+            List<PageNode> filtered = new ArrayList<>();
+            for (PageNode p : pages) {
+                String c = normalizeCity(p.getCity());
+                // 只保留 city == userCity，其它（全台 / null / 外縣市）都丟掉
+                if (c != null && c.equals(finalCity)) {
+                    filtered.add(p);
+                }
+            }
+            System.out.println("[City Filter] 原始 " + pages.size() +
+                    " 筆 → 內文＋標題解析後，同城市 " + filtered.size() + " 筆");
+            pages = filtered;
         }
 
         // 3.5 依「是否過期」分組（沒有日期的一律當作未過期）
@@ -362,7 +365,7 @@ public class SearchEngine {
         // 只用「頁面本身」決定城市，不從 query/userCity 硬猜
         String city = LocationRecognizer.extractCity(r.title);
         if (city == null || city.isEmpty()) {
-            city = "全台";    // 抓不到城市就先標全台，之後嚴格模式會把它踢掉
+            city = "全台";    // 抓不到城市就先標全台，之後爬完內文可能會改掉
         }
 
         String domain = extractDomain(r.link);
@@ -431,7 +434,6 @@ public class SearchEngine {
             sb.append(" 台灣");
         }
 
-        // 這裡就是你問的：這些字是「不要出現」的（加 -）
         sb.append(" -申請 -申請辦法 -徵選 -補助 -招標 -採購 -招生 -簡章 -課程簡章 -履歷");
 
         return sb.toString();
