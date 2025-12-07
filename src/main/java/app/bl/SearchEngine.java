@@ -153,9 +153,6 @@ public class SearchEngine {
         return pagesToRank;
     }
 
-    // 其餘程式維持不變 ...
-
-
     // ======================= 爬蟲相關 =======================
 
     private static void parallelCrawl(List<PageNode> pages, List<String> queryTokens,
@@ -188,6 +185,7 @@ public class SearchEngine {
         System.out.println("[Crawl] 成功爬取 " + crawled + "/" + pages.size() + " 個網站");
     }
 
+    /** ★ 重點修正：把內文寫回 PageNode，並用內文抓日期 */
     private static void crawlPageFast(PageNode page, List<String> queryTokens, LocalDate today) {
         try {
             WebCrawler.CrawlResult result = WebCrawler.crawl(page.getUrl());
@@ -202,17 +200,21 @@ public class SearchEngine {
                 page.setTitle(crawledTitle);
             }
 
-            // 2. 內文抓日期
-            if (page.getEventDate() == null) {
-                LocalDate contentDate =
-                        extractDateFromContent(result.getTextContent(), today);
+            // 2. ★ 把完整內文塞回 PageNode，後面 RankCalculator 才看得到
+            String content = result.getTextContent();
+            if (content != null) {
+                page.setTextContent(content);
+            }
+
+            // 3. 內文抓日期（如果目前還沒有日期）
+            if (page.getEventDate() == null && content != null && !content.isEmpty()) {
+                LocalDate contentDate = extractDateFromContent(content, today);
                 if (contentDate != null) {
                     page.setEventDate(contentDate);
                 }
             }
 
-            // 3. 內文關鍵字 match 加分
-            String content = result.getTextContent();
+            // 4. 內文關鍵字 match 加分
             if (content != null && !content.isEmpty()) {
                 int matchCount = 0;
                 String contentLower = content.toLowerCase();
@@ -224,7 +226,7 @@ public class SearchEngine {
                 page.addScore(matchCount * 5);   // 每 match 一個加 5 分
             }
 
-            // 4. 建立子頁節點（這裡只放 URL & title，不需要 text）
+            // 5. 建立子頁節點（這裡只放 URL & title，不需要 text）
             List<String> links = result.getLinks();
             if (links != null) {
                 int subCount = Math.min(links.size(), 10);
@@ -311,7 +313,7 @@ public class SearchEngine {
         String domain = extractDomain(r.link);
         List<String> tokensCopy = new ArrayList<>(queryTokens);
 
-        // ★ 用原本就存在的工廠方法 of(...)，避免 constructor error
+        // 用工廠方法 of(...) 建 PageNode
         return PageNode.of(r.link, r.title, tf, eventDate, city, domain, tokensCopy);
     }
 
@@ -376,11 +378,73 @@ public class SearchEngine {
         return false;
     }
 
-    private static LocalDate extractDateFromContent(String content, LocalDate today) {
-        return parseDateFromText(content, today);
-    }
+    /** ★ 強化版日期解析：支援西元年、民國年、純「X月X日」 */
     private static LocalDate extractDateFromTitle(String title, LocalDate today) {
-        return parseDateFromText(title, today);
+        if (title == null) return null;
+
+        // 1) 2025-10-10 / 2025/10/10 / 2025.10.10 / 2025年10月10日
+        Pattern p1 = Pattern.compile(
+                "(20\\d{2})[./年\\-](0?[1-9]|1[0-2])[./月\\-](0?[1-9]|[12]\\d|3[01])"
+        );
+        Matcher m1 = p1.matcher(title);
+        if (m1.find()) {
+            try {
+                int year = Integer.parseInt(m1.group(1));
+                int month = Integer.parseInt(m1.group(2));
+                int day = Integer.parseInt(m1.group(3));
+                return LocalDate.of(year, month, day);
+            } catch (Exception ignored) {}
+        }
+
+        // 2) 民國年：114年10月10日 → 2025-10-10
+        Pattern pRoc = Pattern.compile(
+                "(1\\d{2})年(0?[1-9]|1[0-2])月(0?[1-9]|[12]\\d|3[01])日"
+        );
+        Matcher mRoc = pRoc.matcher(title);
+        if (mRoc.find()) {
+            try {
+                int roc = Integer.parseInt(mRoc.group(1));
+                int year = roc + 1911;
+                int month = Integer.parseInt(mRoc.group(2));
+                int day = Integer.parseInt(mRoc.group(3));
+                return LocalDate.of(year, month, day);
+            } catch (Exception ignored) {}
+        }
+
+        // 3) 沒寫年份：10月10日 → 用當年，若已過就 +1 年
+        Pattern p2 = Pattern.compile("(0?[1-9]|1[0-2])月(0?[1-9]|[12]\\d|3[01])日");
+        Matcher m2 = p2.matcher(title);
+        if (m2.find()) {
+            try {
+                int month = Integer.parseInt(m2.group(1));
+                int day = Integer.parseInt(m2.group(2));
+                LocalDate date = LocalDate.of(today.getYear(), month, day);
+                if (date.isBefore(today)) {
+                    date = date.plusYears(1);
+                }
+                return date;
+            } catch (Exception ignored) {}
+        }
+
+        return null;
+    }
+
+    private static LocalDate extractDateFromContent(String text, LocalDate today) {
+        if (text == null) return null;
+        String content = text.length() > 8000 ? text.substring(0, 8000) : text;
+
+        String[] hints = {"活動日期", "市集時間", "活動時間", "展覽日期", "日期", "時間"};
+        for (String hint : hints) {
+            int idx = content.indexOf(hint);
+            if (idx >= 0) {
+                int start = Math.max(0, idx - 10);
+                int end = Math.min(content.length(), idx + 80);
+                String slice = content.substring(start, end);
+                LocalDate d = extractDateFromTitle(slice, today);
+                if (d != null) return d;
+            }
+        }
+        return extractDateFromTitle(content, today);
     }
 
     private static String detectCityFromQuery(String query) {
@@ -392,81 +456,6 @@ public class SearchEngine {
             }
         }
         return "";
-    }
-    private static LocalDate parseDateFromText(String text, LocalDate today) {
-        if (text == null) return null;
-        // 為了效率，保留前 4000 字就好
-        String s = text.length() > 4000 ? text.substring(0, 4000) : text;
-
-        // ① 民國年：114年10月10日、113/5/21、112-12-30
-        Pattern rocFull = Pattern.compile("(1\\d{2})\\s*[年./\\-]\\s*(\\d{1,2})\\s*[月./\\-]\\s*(\\d{1,2})\\s*日?");
-        Matcher mRoc = rocFull.matcher(s);
-        if (mRoc.find()) {
-            try {
-                int rocYear = Integer.parseInt(mRoc.group(1));
-                int year = rocYear + 1911;          // 114 → 2025
-                int month = Integer.parseInt(mRoc.group(2));
-                int day = Integer.parseInt(mRoc.group(3));
-                return LocalDate.of(year, month, day);
-            } catch (Exception ignored) {}
-        }
-
-        // ② 西元年（有「年」）：2025年10月10日
-        Pattern gregCn = Pattern.compile("(20\\d{2})\\s*年\\s*(\\d{1,2})\\s*月\\s*(\\d{1,2})\\s*日?");
-        Matcher mCn = gregCn.matcher(s);
-        if (mCn.find()) {
-            try {
-                int year = Integer.parseInt(mCn.group(1));
-                int month = Integer.parseInt(mCn.group(2));
-                int day = Integer.parseInt(mCn.group(3));
-                return LocalDate.of(year, month, day);
-            } catch (Exception ignored) {}
-        }
-
-        // ③ 西元年：2025/10/10, 2025-10-10, 2025.10.10
-        Pattern greg = Pattern.compile("(20\\d{2})[./\\-](\\d{1,2})[./\\-](\\d{1,2})");
-        Matcher m1 = greg.matcher(s);
-        if (m1.find()) {
-            try {
-                int year = Integer.parseInt(m1.group(1));
-                int month = Integer.parseInt(m1.group(2));
-                int day = Integer.parseInt(m1.group(3));
-                return LocalDate.of(year, month, day);
-            } catch (Exception ignored) {}
-        }
-
-        // ④ 只有「X月X日」
-        Pattern mdCn = Pattern.compile("(\\d{1,2})\\s*月\\s*(\\d{1,2})\\s*日");
-        Matcher m2 = mdCn.matcher(s);
-        if (m2.find()) {
-            try {
-                int month = Integer.parseInt(m2.group(1));
-                int day = Integer.parseInt(m2.group(2));
-                LocalDate date = LocalDate.of(today.getYear(), month, day);
-                // 如果今年已經過了，就視為明年同一天（多數活動會在未來）
-                if (date.isBefore(today)) {
-                    date = date.plusYears(1);
-                }
-                return date;
-            } catch (Exception ignored) {}
-        }
-
-        // ⑤ 只有「MM/DD」或「MM-DD」或「MM.DD」 → 也是同樣邏輯
-        Pattern md = Pattern.compile("(\\d{1,2})[./\\-](\\d{1,2})(?!\\d)");
-        Matcher m3 = md.matcher(s);
-        if (m3.find()) {
-            try {
-                int month = Integer.parseInt(m3.group(1));
-                int day = Integer.parseInt(m3.group(2));
-                LocalDate date = LocalDate.of(today.getYear(), month, day);
-                if (date.isBefore(today)) {
-                    date = date.plusYears(1);
-                }
-                return date;
-            } catch (Exception ignored) {}
-        }
-
-        return null;
     }
 
     private static String extractDomain(String url) {
