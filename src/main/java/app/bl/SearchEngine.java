@@ -27,18 +27,16 @@ public class SearchEngine {
     private static final int MAX_GOOGLE_RESULTS = 15;
     private static final boolean ENABLE_CRAWLING = true;
     private static final int SEARCH_TIMEOUT_MS = 8000;      // 整體搜尋最多 8 秒
-    private static final int CRAWL_PARALLEL_LIMIT = 5;      // 同時爬取 5 個網站
+    private static final int CRAWL_PARALLEL_LIMIT = 15;      // 提高同時爬取數量
     private static final ExecutorService CRAWL_EXECUTOR =
             Executors.newFixedThreadPool(CRAWL_PARALLEL_LIMIT);
 
-    // 活動相關關鍵字（給 refineQuery / scoring 用）
     private static final List<String> EVENT_TERMS = List.of(
             "活動", "展覽", "音樂", "演唱會", "市集", "節慶",
             "festival", "concert", "exhibition", "event",
             "表演", "藝術", "體驗", "親子", "戶外", "講座"
     );
 
-    // 類別 → 類別關鍵字擴充（給 parseQueryTokens 用）
     private static final Map<String, List<String>> CATEGORY_EXPANSIONS = Map.ofEntries(
             Map.entry("市集", List.of("文創市集", "手作市集", "假日市集", "聖誕市集", "週末市集")),
             Map.entry("展覽", List.of("藝術展", "美術展", "攝影展", "設計展")),
@@ -47,7 +45,6 @@ public class SearchEngine {
             Map.entry("festival", List.of("market", "festival", "fair"))
     );
 
-    // 查詢擴充字典（給 expandQuery 用）
     private static final Map<String, List<String>> EXPANSION = Map.of(
             "市集", List.of("文創市集", "手作市集", "假日市集", "聖誕市集", "創意市集", "跳蚤市集"),
             "展覽", List.of("特展", "藝術展", "美術館展覽", "主題展覽", "攝影展", "設計展"),
@@ -56,7 +53,6 @@ public class SearchEngine {
             "運動", List.of("路跑", "馬拉松", "健走", "運動賽事", "自行車")
     );
 
-    // 城市別名
     private static final Map<String, String> CITY_ALIASES = Map.ofEntries(
             Map.entry("台北", "台北"), Map.entry("臺北", "台北"), Map.entry("taipei", "台北"),
             Map.entry("新北", "新北"),
@@ -66,15 +62,12 @@ public class SearchEngine {
             Map.entry("桃園", "桃園"), Map.entry("基隆", "基隆"), Map.entry("新竹", "新竹")
     );
 
-    // 排除網域（社群已拿掉，避免被扣掉）
     private static final Set<String> EXCLUDED_DOMAINS = Set.of(
             "x.com", "twitter.com", "ptt.cc"
     );
 
     private static Tree lastSearchTree;
     private static List<PageNode> lastResults = new ArrayList<>();
-
-    // ======================= 主搜尋流程 =======================
 
     public static List<PageNode> search(String query, UserProfile user) throws Exception {
         System.out.println("\n╔══════════════════════════════════════════╗");
@@ -85,7 +78,6 @@ public class SearchEngine {
         long startTime = System.currentTimeMillis();
         LocalDate today = LocalDate.now();
 
-        // 1. city 補到 query 裡
         String userCity = (user != null) ? user.getUserCity() : null;
         if (userCity != null && !userCity.isEmpty()) {
             String queryLower = query.toLowerCase();
@@ -96,24 +88,19 @@ public class SearchEngine {
             }
         }
 
-        // 2. 高階查詢擴充（文創市集、路跑…）
         query = expandQuery(query);
 
-        // 3. refine 給 Google 的查詢字串
         String refinedQuery = refineQuery(query);
         System.out.println("[Refined] " + refinedQuery);
 
-        // 4. 呼叫 Google Search API
         System.out.println("\n[Step 1] 呼叫 Google API...");
         List<GoogleConnector.Result> googleResults =
-                GoogleConnector.search(refinedQuery, MAX_GOOGLE_RESULTS);
+                GoogleConnector.search(refinedQuery, MAX_GOOGLE_RESULTS, 3000); // timeout 3s
         System.out.println("[Google] 取得 " + googleResults.size() + " 個結果");
 
-        // 5. 解析 query tokens
         List<String> queryTokens = parseQueryTokens(query);
         System.out.println("[Tokens] " + queryTokens);
 
-        // 6. 先快速建立 PageNode（不爬）
         System.out.println("\n[Step 2] 建立頁面節點...");
         List<PageNode> pages = new ArrayList<>();
         for (GoogleConnector.Result r : googleResults) {
@@ -123,10 +110,9 @@ public class SearchEngine {
         }
         System.out.println("[Pages] 建立 " + pages.size() + " 個頁面節點");
 
-        // 7. 並行快爬（有時間限制）
         if (ENABLE_CRAWLING && !pages.isEmpty()) {
             long elapsed = System.currentTimeMillis() - startTime;
-            long remainingTime = SEARCH_TIMEOUT_MS - elapsed - 1000; // 留 1s 給 ranking
+            long remainingTime = SEARCH_TIMEOUT_MS - elapsed - 1000;
             if (remainingTime > 2000) {
                 System.out.println("\n[Step 3] 並行爬取網頁 (限時 " + remainingTime + " ms)...");
                 parallelCrawl(pages, queryTokens, remainingTime, today);
@@ -135,7 +121,6 @@ public class SearchEngine {
             }
         }
 
-        // 8. 過濾過期活動
         List<PageNode> validPages = new ArrayList<>();
         List<PageNode> expiredPages = new ArrayList<>();
         for (PageNode p : pages) {
@@ -151,11 +136,9 @@ public class SearchEngine {
         System.out.printf("[Filter] 未過期: %d, 已過期: %d%n",
                 validPages.size(), expiredPages.size());
 
-        // 9. ranking（用原本 RankCalculator 的版本）
         System.out.println("\n[Step 4] 計算分數...");
-        RankCalculator.rank(pagesToRank, user);
+        RankCalculator.rank(pagesToRank, user, query); // 改用三參數 ranking
 
-        // 10. 建樹 & 記錄最後結果
         Tree tree = new Tree();
         tree.addPages(pagesToRank);
         lastSearchTree = tree;
@@ -169,6 +152,9 @@ public class SearchEngine {
 
         return pagesToRank;
     }
+
+    // 其餘程式維持不變 ...
+
 
     // ======================= 爬蟲相關 =======================
 
