@@ -717,14 +717,13 @@ public class SearchEngine {
     }
 
     private static void printResultsSummary(List<PageNode> pages) {
-        System.out.println("\n📊 Top 5 結果：");
+        System.out.println("\n📊 搜尋結果摘要（共 " + pages.size() + " 筆）：");
         System.out.println("─".repeat(60));
         int rank = 1;
         for (PageNode p : pages) {
             String dateStr = (p.getEventDate() != null) ? p.getEventDate().toString() : "無日期";
             System.out.printf("#%d [%.1f] %s | %s%n",
                     rank++, p.getTotalScore(), dateStr, truncate(p.getTitle(), 35));
-            if (rank > 5) break;
         }
         System.out.println("─".repeat(60));
     }
