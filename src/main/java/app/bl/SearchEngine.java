@@ -377,62 +377,70 @@ public class SearchEngine {
     /**
      * 新版 refineQuery
      */
-    private static String refineQuery(String query) {
-        String q = (query == null) ? "" : query.trim();
-        if (q.isEmpty()) return q;
+    /**
+ * 新版 refineQuery（穩定台灣來源 + 支援類別擴充 + 排除無效關鍵字）
+ */
+private static String refineQuery(String query) {
+    String q = (query == null) ? "" : query.trim();
+    if (q.isEmpty()) return q;
 
-        String lower = q.toLowerCase();
+    String lower = q.toLowerCase();
 
-        boolean hasCity = CITY_ALIASES.keySet().stream()
-                .anyMatch(alias -> lower.contains(alias.toLowerCase()));
+    boolean hasCity = CITY_ALIASES.keySet().stream()
+            .anyMatch(alias -> lower.contains(alias.toLowerCase()));
 
-        boolean hasEventWord = EVENT_TERMS.stream()
-                .anyMatch(term -> lower.contains(term.toLowerCase()));
+    boolean hasEventWord = EVENT_TERMS.stream()
+            .anyMatch(term -> lower.contains(term.toLowerCase()));
 
-        boolean hasYear =
-                lower.matches(".*20\\d{2}.*") ||
-                        lower.matches(".*1\\d{2}年.*") ||
-                        lower.contains("今年") ||
-                        lower.contains("明年");
+    boolean hasYear =
+            lower.matches(".*20\\d{2}.*") ||
+            lower.matches(".*1\\d{2}年.*") ||
+            lower.contains("今年") ||
+            lower.contains("明年");
 
-        boolean hasTaiwan =
-                lower.contains("台灣") ||
-                        lower.contains("臺灣") ||
-                        lower.contains("taiwan");
+    boolean hasTaiwan =
+            lower.contains("台灣") ||
+            lower.contains("臺灣") ||
+            lower.contains("taiwan");
 
-        StringBuilder sb = new StringBuilder(q);
+    StringBuilder sb = new StringBuilder(q);
 
-        if (!hasEventWord) {
-            sb.append(" (活動 OR 展覽 OR 演唱會 OR 音樂會 OR 市集)");
-        } else {
-            for (Map.Entry<String, List<String>> e : CATEGORY_EXPANSIONS.entrySet()) {
-                String key = e.getKey().toLowerCase();
-                if (lower.contains(key)) {
-                    sb.append(" (").append(e.getKey());
-                    for (String alias : e.getValue()) {
-                        if (!lower.contains(alias.toLowerCase())) {
-                            sb.append(" OR ").append(alias);
-                        }
+    // 類別擴充
+    if (!hasEventWord) {
+        sb.append(" (活動 OR 展覽 OR 演唱會 OR 音樂會 OR 市集)");
+    } else {
+        for (Map.Entry<String, List<String>> e : CATEGORY_EXPANSIONS.entrySet()) {
+            String key = e.getKey().toLowerCase();
+            if (lower.contains(key)) {
+                sb.append(" (").append(e.getKey());
+                for (String alias : e.getValue()) {
+                    if (!lower.contains(alias.toLowerCase())) {
+                        sb.append(" OR ").append(alias);
                     }
-                    sb.append(")");
-                    break;
                 }
+                sb.append(")");
+                break;
             }
         }
-
-        if (!hasYear) {
-            int year = LocalDate.now().getYear();
-            sb.append(" ").append(year).append(" OR ").append(year + 1);
-        }
-
-        if (!hasTaiwan && !hasCity) {
-            sb.append(" 台灣");
-        }
-
-        sb.append(" -申請 -申請辦法 -徵選 -補助 -招標 -採購 -招生 -簡章 -課程簡章 -履歷");
-
-        return sb.toString();
     }
+
+    // 自動補年份
+    if (!hasYear) {
+        int year = LocalDate.now().getYear();
+        sb.append(" ").append(year).append(" OR ").append(year + 1);
+    }
+
+    // ❗ 關鍵修正：不論是否有城市，只要沒寫「台灣」就補「台灣」
+    if (!hasTaiwan) {
+        sb.append(" 台灣");
+    }
+
+    // 排除你不想要的結果
+    sb.append(" -申請 -申請辦法 -徵選 -補助 -招標 -採購 -招生 -簡章 -課程簡章 -履歷");
+
+    return sb.toString();
+}
+
 
     private static List<String> parseQueryTokens(String query) {
         List<String> tokens = new ArrayList<>();
