@@ -9,28 +9,9 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * RankCalculator v3.1 - 精準匹配優化版
+ * RankCalculator v3.2 - 所有來源平等處理
  */
 public class RankCalculator {
-
-    private static final Map<String, Double> TICKET_PLATFORMS = Map.of(
-        "kktix.com", 2.2,
-        "accupass.com", 2.2,
-        "tixcraft.com", 2.0,
-        "ticket.com.tw", 2.0,
-        "ticketplus.com.tw", 1.9,
-        "ibon.com.tw", 1.8,
-        "opentix.life", 2.0,
-        "indievox.com", 1.9
-    );
-
-    private static final Map<String, Double> EVENT_PLATFORMS = Map.of(
-        "klook.com", 1.8,
-        "kkday.com", 1.8,
-        "citytalk.tw", 1.7,
-        "eventbrite.com", 1.7,
-        "meetup.com", 1.6
-    );
 
     private static final Map<String, Double> OFFICIAL_VENUES = Map.of(
         "npac-ntch.org", 1.7,
@@ -41,18 +22,6 @@ public class RankCalculator {
         "songyanculture.taipei", 1.6,
         "legacy.com.tw", 1.5
     );
-
-    private static final Set<String> SOCIAL_MEDIA = Set.of(
-        "instagram.com", "facebook.com", "fb.com", 
-        "threads.net", "youtube.com"
-    );
-    private static final double SOCIAL_MEDIA_BOOST = 1.4;
-
-    private static final Set<String> SHOPPING_SITES = Set.of(
-        "shopee.tw", "momo.com", "pcstore.com.tw", 
-        "ruten.com.tw", "books.com.tw", "amazon"
-    );
-    private static final double SHOPPING_PENALTY = 0.2;
 
     private static final Set<String> PROPER_NOUNS = Set.copyOf(new HashSet<>(List.of(
         "政大", "台大", "師大", "清大", "交大", "成大", "中央", "中山", "中興", "北大",
@@ -218,29 +187,9 @@ public class RankCalculator {
     }
 
     private static double calculateSourceMultiplier(String domain) {
-        for (Map.Entry<String, Double> entry : TICKET_PLATFORMS.entrySet()) {
-            if (domain.contains(entry.getKey())) {
-                return entry.getValue();
-            }
-        }
-        for (Map.Entry<String, Double> entry : EVENT_PLATFORMS.entrySet()) {
-            if (domain.contains(entry.getKey())) {
-                return entry.getValue();
-            }
-        }
         for (Map.Entry<String, Double> entry : OFFICIAL_VENUES.entrySet()) {
             if (domain.contains(entry.getKey())) {
                 return entry.getValue();
-            }
-        }
-        for (String social : SOCIAL_MEDIA) {
-            if (domain.contains(social)) {
-                return SOCIAL_MEDIA_BOOST;
-            }
-        }
-        for (String shop : SHOPPING_SITES) {
-            if (domain.contains(shop)) {
-                return SHOPPING_PENALTY;
             }
         }
         if (domain.endsWith(".gov.tw")) {

@@ -7,11 +7,12 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * PageNode v2.0 - 網頁節點（支援子網頁）
+ * PageNode v2.1 - 網頁節點（支援子網頁 + 城市正規化）
  * 
  * 更新：
  * - 新增 setTotalScore() setter
  * - 新增 setEventDate() setter
+ * - 城市名稱將自動正規化為標準格式（例如「臺北」→「台北」）
  */
 public class PageNode {
     
@@ -46,10 +47,28 @@ public class PageNode {
         p.title = title;
         p.tf = tf != null ? tf : new HashMap<>();
         p.eventDate = date;
-        p.city = city;
+        p.city = normalizeCity(city);
         p.domain = domain;
         p.tokens = tokens != null ? tokens : new ArrayList<>();
         return p;
+    }
+
+    // ============ 城市正規化 ============
+    private static String normalizeCity(String city) {
+        if (city == null) return null;
+        String c = city.trim().toLowerCase();
+        if (c.matches("(台北|臺北|taipei)")) return "台北";
+        if (c.matches("(新北|new taipei)")) return "新北";
+        if (c.matches("(台中|臺中|taichung)")) return "台中";
+        if (c.matches("(台南|臺南|tainan)")) return "台南";
+        if (c.matches("(高雄|kaohsiung)")) return "高雄";
+        if (c.matches("(桃園|taoyuan)")) return "桃園";
+        if (c.matches("(基隆|keelung)")) return "基隆";
+        if (c.matches("(新竹|hsinchu)")) return "新竹";
+        if (c.matches("(嘉義|chiayi)")) return "嘉義";
+        if (c.matches("(花蓮|hualien)")) return "花蓮";
+        if (c.matches("(台東|臺東|taitung)")) return "台東";
+        return city;
     }
     
     // ============ 子網頁相關 ============
@@ -77,12 +96,9 @@ public class PageNode {
         return totalScore;
     }
     
-    // ★ 新增 setter
     public void setTotalScore(double totalScore) {
         this.totalScore = totalScore;
     }
-    
-    // ============ 分數計算輔助 ============
     
     public double calculateProximityBonus(List<String> queryTokens) {
         if (queryTokens == null || queryTokens.size() < 2) return 1.0;
@@ -101,54 +117,47 @@ public class PageNode {
         
         return Math.min(bonus, 2.0);
     }
-    
-    // ============ Getters & Setters ============
-    
+
     public String getUrl() { return url; }
     public void setUrl(String url) { this.url = url; }
-    
+
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }
-    
+
     public String getDomain() { return domain; }
     public void setDomain(String domain) { this.domain = domain; }
-    
+
     public String getCity() { return city; }
-    public void setCity(String city) { this.city = city; }
-    
+    public void setCity(String city) { this.city = normalizeCity(city); }
+
     public LocalDate getEventDate() { return eventDate; }
-    
-    // ★ 新增 setter
-    public void setEventDate(LocalDate eventDate) { 
-        this.eventDate = eventDate; 
-    }
-    
+    public void setEventDate(LocalDate eventDate) { this.eventDate = eventDate; }
+
     public Map<Keyword, Integer> tf() { return tf; }
     public Map<Keyword, Integer> getTf() { return tf; }
     public void setTf(Map<Keyword, Integer> tf) { this.tf = tf; }
-    
+
     public List<String> getTokens() { return tokens; }
     public void setTokens(List<String> tokens) { this.tokens = tokens; }
-    
+
     public double getScore() { return score; }
     public void setScore(double score) { this.score = score; }
-    
-    // ★ 新增：累加分數
+
     public void addScore(double bonus) { this.score += bonus; }
-    
+
     public double getSubPagesScore() { return subPagesScore; }
     public void setSubPagesScore(double score) { this.subPagesScore = score; }
-    
+
     public String getTextContent() { return textContent; }
     public void setTextContent(String textContent) { this.textContent = textContent; }
-    
+
     public boolean isCrawled() { return crawled; }
     public void setCrawled(boolean crawled) { this.crawled = crawled; }
-    
+
     public int getSubPageCount() {
         return subPages.size();
     }
-    
+
     @Override
     public String toString() {
         return String.format("PageNode[%.1f]: %s (%d subpages)", 
