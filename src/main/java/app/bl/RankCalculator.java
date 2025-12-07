@@ -9,12 +9,14 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * RankCalculator v3.2 - 內容導向、平台幾乎平等版
+ * RankCalculator v3.3 - 內容導向、平台幾乎平等版 + 城市加權
  *
  * 主要設計：
  * 1. 以「關鍵字匹配 + 內文完整度 + 日期新鮮度」為主
  * 2. 不再對售票平台 / 活動平台給超大加權，大家幾乎平等
  * 3. 只保留「文化 / 觀光類政府網站」一點點加分（資訊較可靠）
+ * 4. 同城活動明顯優先：同城市放大權重，不同城市降低權重
+ * 5. 會吃到 PageNode 在爬蟲階段累積的 score（內文 match 等）
  */
 public class RankCalculator {
 
@@ -37,7 +39,7 @@ public class RankCalculator {
         "申請", "補助", "辦法", "要點", "徵選", "徵件",
         "招標", "採購", "規定", "須知", "下載"
     );
-    private static final double APPLICATION_PENALTY = 0.3;   // 只保留中度懲罰
+    private static final double APPLICATION_PENALTY = 0.3;   // 中度懲罰
 
     // ===== 活動類型加分 =====
     private static final Map<String, Double> EVENT_TYPE_BOOST = Map.ofEntries(
@@ -124,7 +126,8 @@ public class RankCalculator {
             List<String> normalTokens,
             LocalDate today) {
 
-        double score = 0.0;
+        // ✅ 先從爬蟲階段累積的 score 起跑（內文 match 等）
+        double score = p.getScore();
 
         String title = p.getTitle() != null ? p.getTitle() : "";
         String titleLower = title.toLowerCase();
@@ -209,7 +212,11 @@ public class RankCalculator {
         double sourceMultiplier = calculateSourceMultiplier(domain);
         score *= sourceMultiplier;
 
-        // 8️⃣ 活動類型加成（只取第一個命中的）
+        // 8️⃣ 申請 / 辦法類頁面懲罰（用 title + URL 判斷）
+        double contentMultiplier = calculateContentMultiplier(title, p.getUrl());
+        score *= contentMultiplier;
+
+        // 9️⃣ 活動類型加成（只取第一個命中的）
         for (Map.Entry<String, Double> entry : EVENT_TYPE_BOOST.entrySet()) {
             if (titleLower.contains(entry.getKey().toLowerCase())) {
                 score *= entry.getValue();
@@ -217,10 +224,20 @@ public class RankCalculator {
             }
         }
 
-        // 9️⃣ 城市匹配：與使用者城市相同，稍微加權
+        // 🔟 城市匹配：同城大加分，異城明顯降分；「全台」不調整
         String userCity = (user != null) ? user.getUserCity() : null;
-        if (userCity != null && p.getCity() != null && p.getCity().equals(userCity)) {
-            score *= 1.15;
+        String pageCity = p.getCity();
+
+        if (userCity != null && pageCity != null && !pageCity.isEmpty()
+                && !"全台".equals(pageCity)) {
+
+            if (pageCity.equals(userCity)) {
+                // 同城市：加大權重，讓本地活動優先出現在前面
+                score *= 1.4;
+            } else {
+                // 不同城市：明顯降低權重
+                score *= 0.6;
+            }
         }
 
         return Math.max(0.1, score);
