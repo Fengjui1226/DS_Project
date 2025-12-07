@@ -27,7 +27,7 @@ public class SearchEngine {
     private static final int MAX_GOOGLE_RESULTS = 15;
     private static final boolean ENABLE_CRAWLING = true;
     private static final int SEARCH_TIMEOUT_MS = 8000;      // 整體搜尋最多 8 秒
-    private static final int CRAWL_PARALLEL_LIMIT = 15;      // 提高同時爬取數量
+    private static final int CRAWL_PARALLEL_LIMIT = 15;     // 同時爬取數量
     private static final ExecutorService CRAWL_EXECUTOR =
             Executors.newFixedThreadPool(CRAWL_PARALLEL_LIMIT);
 
@@ -53,11 +53,12 @@ public class SearchEngine {
             "運動", List.of("路跑", "馬拉松", "健走", "運動賽事", "自行車")
     );
 
+    /** 城市同義字 → 正規化城市名稱 */
     private static final Map<String, String> CITY_ALIASES = Map.ofEntries(
             Map.entry("台北", "台北"), Map.entry("臺北", "台北"), Map.entry("taipei", "台北"),
             Map.entry("新北", "新北"),
             Map.entry("台中", "台中"), Map.entry("臺中", "台中"), Map.entry("taichung", "台中"),
-            Map.entry("台南", "台南"), Map.entry("臺南", "台南"),
+            Map.entry("台南", "台南"), Map.entry("臺南", "台南"), Map.entry("tainan", "台南"),
             Map.entry("高雄", "高雄"), Map.entry("kaohsiung", "高雄"),
             Map.entry("桃園", "桃園"), Map.entry("基隆", "基隆"), Map.entry("新竹", "新竹")
     );
@@ -69,15 +70,20 @@ public class SearchEngine {
     private static Tree lastSearchTree;
     private static List<PageNode> lastResults = new ArrayList<>();
 
+    // =====================================================
+    // 主流程
+    // =====================================================
+
     public static List<PageNode> search(String query, UserProfile user) throws Exception {
         System.out.println("\n╔══════════════════════════════════════════╗");
-        System.out.println("║   🔍 EventFinder v4.0 (快速回應版)        ║");
+        System.out.println("║   🔍 EventFinder v4.1 (日期 & 城市強化版)  ║");
         System.out.println("╚══════════════════════════════════════════╝");
         System.out.println("[Query] " + query);
 
         long startTime = System.currentTimeMillis();
         LocalDate today = LocalDate.now();
 
+        // 1. 若使用者有設定城市，但 query 沒寫城市 → 幫他加上
         String userCity = (user != null) ? user.getUserCity() : null;
         if (userCity != null && !userCity.isEmpty()) {
             String queryLower = query.toLowerCase();
@@ -88,11 +94,14 @@ public class SearchEngine {
             }
         }
 
+        // 2. 類別關鍵字擴充（市集 → 文創市集…）
         query = expandQuery(query);
 
+        // 3. 給 Google 用的 query 微調（年份 / 排除「申請辦法」等）
         String refinedQuery = refineQuery(query);
         System.out.println("[Refined] " + refinedQuery);
 
+        // ================== Step 1: Google ==================
         System.out.println("\n[Step 1] 呼叫 Google API...");
         List<GoogleConnector.Result> googleResults =
                 GoogleConnector.search(refinedQuery, MAX_GOOGLE_RESULTS, 3000); // timeout 3s
@@ -101,6 +110,7 @@ public class SearchEngine {
         List<String> queryTokens = parseQueryTokens(query);
         System.out.println("[Tokens] " + queryTokens);
 
+        // ================== Step 2: 建立 PageNode ==================
         System.out.println("\n[Step 2] 建立頁面節點...");
         List<PageNode> pages = new ArrayList<>();
         for (GoogleConnector.Result r : googleResults) {
@@ -110,6 +120,7 @@ public class SearchEngine {
         }
         System.out.println("[Pages] 建立 " + pages.size() + " 個頁面節點");
 
+        // ================== Step 3: 並行爬取 ==================
         if (ENABLE_CRAWLING && !pages.isEmpty()) {
             long elapsed = System.currentTimeMillis() - startTime;
             long remainingTime = SEARCH_TIMEOUT_MS - elapsed - 1000;
@@ -121,6 +132,7 @@ public class SearchEngine {
             }
         }
 
+        // 3.5 依「是否過期」分組（沒有日期的一律當作未過期）
         List<PageNode> validPages = new ArrayList<>();
         List<PageNode> expiredPages = new ArrayList<>();
         for (PageNode p : pages) {
@@ -136,9 +148,14 @@ public class SearchEngine {
         System.out.printf("[Filter] 未過期: %d, 已過期: %d%n",
                 validPages.size(), expiredPages.size());
 
+        // ================== Step 4: 排名計算 ==================
         System.out.println("\n[Step 4] 計算分數...");
-        RankCalculator.rank(pagesToRank, user, query); // 改用三參數 ranking
+        RankCalculator.rank(pagesToRank, user, query);   // RankCalculator 先算一次
 
+        // 額外城市加權：使用者選城市時，加強該城市，壓低其他縣市
+        applyUserCityBoost(pagesToRank, user);
+
+        // 建 search tree / log
         Tree tree = new Tree();
         tree.addPages(pagesToRank);
         lastSearchTree = tree;
@@ -153,7 +170,9 @@ public class SearchEngine {
         return pagesToRank;
     }
 
-    // ======================= 爬蟲相關 =======================
+    // =====================================================
+    // 爬蟲相關
+    // =====================================================
 
     private static void parallelCrawl(List<PageNode> pages, List<String> queryTokens,
                                       long timeoutMs, LocalDate today) {
@@ -185,7 +204,12 @@ public class SearchEngine {
         System.out.println("[Crawl] 成功爬取 " + crawled + "/" + pages.size() + " 個網站");
     }
 
-    /** ★ 重點修正：把內文寫回 PageNode，並用內文抓日期 */
+    /**
+     * ★ 重點修正：
+     *   1. 把完整內文寫回 PageNode
+     *   2. 用「內文 + 標題」重新抓日期 & 城市
+     *   3. 內文關鍵字 match 給加分
+     */
     private static void crawlPageFast(PageNode page, List<String> queryTokens, LocalDate today) {
         try {
             WebCrawler.CrawlResult result = WebCrawler.crawl(page.getUrl());
@@ -193,28 +217,44 @@ public class SearchEngine {
 
             page.setCrawled(true);
 
-            // 1. 標題更長就更新
             String crawledTitle = result.getTitle();
+            String content = result.getTextContent();
+
+            // (1) 若爬到更完整的標題就替換
             if (crawledTitle != null && !crawledTitle.isEmpty()
-                    && crawledTitle.length() > page.getTitle().length()) {
+                    && crawledTitle.length() > (page.getTitle() != null ? page.getTitle().length() : 0)) {
                 page.setTitle(crawledTitle);
             }
 
-            // 2. ★ 把完整內文塞回 PageNode，後面 RankCalculator 才看得到
-            String content = result.getTextContent();
+            // (2) 內文塞回 PageNode，給 RankCalculator 用
             if (content != null) {
                 page.setTextContent(content);
             }
 
-            // 3. 內文抓日期（如果目前還沒有日期）
-            if (page.getEventDate() == null && content != null && !content.isEmpty()) {
-                LocalDate contentDate = extractDateFromContent(content, today);
-                if (contentDate != null) {
-                    page.setEventDate(contentDate);
+            // (3) 用「標題 + 內文」再試一次抓日期（舊的 eventDate 為 null 才補）
+            if (page.getEventDate() == null) {
+                String combined = (crawledTitle != null ? crawledTitle + " " : "") +
+                                  (content != null ? content : "");
+                LocalDate d = extractDateFromContent(combined, today);
+                if (d != null) {
+                    page.setEventDate(d);
                 }
             }
 
-            // 4. 內文關鍵字 match 加分
+            // (4) 用內容再試一次抓城市（原本 city 是「全台」或空再覆蓋）
+            if (content != null) {
+                String originCity = page.getCity();
+                if (originCity == null || originCity.isEmpty() || "全台".equals(originCity)) {
+                    String cityFromText = LocationRecognizer.extractCity(
+                            ((crawledTitle != null) ? crawledTitle + " " : "") + content
+                    );
+                    if (cityFromText != null && !cityFromText.isEmpty()) {
+                        page.setCity(cityFromText);
+                    }
+                }
+            }
+
+            // (5) 內文關鍵字 match → 額外分數
             if (content != null && !content.isEmpty()) {
                 int matchCount = 0;
                 String contentLower = content.toLowerCase();
@@ -226,7 +266,7 @@ public class SearchEngine {
                 page.addScore(matchCount * 5);   // 每 match 一個加 5 分
             }
 
-            // 5. 建立子頁節點（這裡只放 URL & title，不需要 text）
+            // (6) 建立子頁節點（先只放 URL & 推測出來的短標題）
             List<String> links = result.getLinks();
             if (links != null) {
                 int subCount = Math.min(links.size(), 10);
@@ -235,8 +275,8 @@ public class SearchEngine {
                     SubPageNode sub = new SubPageNode(
                             link,
                             extractTitleFromUrl(link),
-                            "",                  // textContent 先給空字串
-                            page.getUrl()        // parentUrl
+                            "",
+                            page.getUrl()
                     );
                     page.addSubPage(sub);
                 }
@@ -263,7 +303,9 @@ public class SearchEngine {
         return "";
     }
 
-    // ======================= 查詢與節點建構 =======================
+    // =====================================================
+    // 查詢 / PageNode 建立
+    // =====================================================
 
     private static String expandQuery(String q) {
         StringBuilder result = new StringBuilder(q);
@@ -302,6 +344,7 @@ public class SearchEngine {
             }
         }
 
+        // 先從標題抓城市
         String city = LocationRecognizer.extractCity(r.title);
         if (city == null || city.isEmpty()) {
             city = detectCityFromQuery(query);
@@ -313,7 +356,6 @@ public class SearchEngine {
         String domain = extractDomain(r.link);
         List<String> tokensCopy = new ArrayList<>(queryTokens);
 
-        // 用工廠方法 of(...) 建 PageNode
         return PageNode.of(r.link, r.title, tf, eventDate, city, domain, tokensCopy);
     }
 
@@ -365,7 +407,9 @@ public class SearchEngine {
         return expanded;
     }
 
-    // ======================= 工具函式 =======================
+    // =====================================================
+    // 工具函式：排除網址 / 日期解析 / 城市處理 / 分數調整
+    // =====================================================
 
     private static boolean shouldExclude(String title, String url) {
         if (url == null) return false;
@@ -378,15 +422,46 @@ public class SearchEngine {
         return false;
     }
 
-    /** ★ 強化版日期解析：支援西元年、民國年、純「X月X日」 */
+    /** 強化版日期解析：標題內的各種寫法都盡量抓一個「起始日期」 */
     private static LocalDate extractDateFromTitle(String title, LocalDate today) {
         if (title == null) return null;
+        return parseDate(title, today);
+    }
 
-        // 1) 2025-10-10 / 2025/10/10 / 2025.10.10 / 2025年10月10日
+    /** 內文解析日期：會先在「活動日期/時間」附近找，再整段掃描 */
+    private static LocalDate extractDateFromContent(String text, LocalDate today) {
+        if (text == null) return null;
+        String content = text.length() > 8000 ? text.substring(0, 8000) : text;
+
+        String[] hints = {"活動日期", "市集時間", "活動時間", "展覽日期", "日期", "時間"};
+        for (String hint : hints) {
+            int idx = content.indexOf(hint);
+            if (idx >= 0) {
+                int start = Math.max(0, idx - 20);
+                int end = Math.min(content.length(), idx + 120);
+                String slice = content.substring(start, end);
+                LocalDate d = parseDate(slice, today);
+                if (d != null) return d;
+            }
+        }
+        return parseDate(content, today);
+    }
+
+    /**
+     * 所有日期 regex 共用的解析器：
+     * 1) 2025-10-10 / 2025/10/10 / 2025.10.10 / 2025年10月10日
+     * 2) 民國年：114年10月10日
+     * 3) 10月10日、10月10–12日
+     * 4) 12/06、12/06–07、12-06、12.06
+     */
+    private static LocalDate parseDate(String text, LocalDate today) {
+        if (text == null) return null;
+
+        // 1) 西元年 + 月日
         Pattern p1 = Pattern.compile(
                 "(20\\d{2})[./年\\-](0?[1-9]|1[0-2])[./月\\-](0?[1-9]|[12]\\d|3[01])"
         );
-        Matcher m1 = p1.matcher(title);
+        Matcher m1 = p1.matcher(text);
         if (m1.find()) {
             try {
                 int year = Integer.parseInt(m1.group(1));
@@ -396,11 +471,11 @@ public class SearchEngine {
             } catch (Exception ignored) {}
         }
 
-        // 2) 民國年：114年10月10日 → 2025-10-10
+        // 2) 民國年：114年10月10日
         Pattern pRoc = Pattern.compile(
                 "(1\\d{2})年(0?[1-9]|1[0-2])月(0?[1-9]|[12]\\d|3[01])日"
         );
-        Matcher mRoc = pRoc.matcher(title);
+        Matcher mRoc = pRoc.matcher(text);
         if (mRoc.find()) {
             try {
                 int roc = Integer.parseInt(mRoc.group(1));
@@ -411,15 +486,35 @@ public class SearchEngine {
             } catch (Exception ignored) {}
         }
 
-        // 3) 沒寫年份：10月10日 → 用當年，若已過就 +1 年
-        Pattern p2 = Pattern.compile("(0?[1-9]|1[0-2])月(0?[1-9]|[12]\\d|3[01])日");
-        Matcher m2 = p2.matcher(title);
+        // 3) 10月10日 / 10月10–12日（抓起始日）
+        Pattern p2 = Pattern.compile(
+                "(0?[1-9]|1[0-2])月(0?[1-9]|[12]\\d|3[01])(?:[\\-~～—至到](0?[1-9]|[12]\\d|3[01]))?日"
+        );
+        Matcher m2 = p2.matcher(text);
         if (m2.find()) {
             try {
                 int month = Integer.parseInt(m2.group(1));
                 int day = Integer.parseInt(m2.group(2));
                 LocalDate date = LocalDate.of(today.getYear(), month, day);
-                if (date.isBefore(today)) {
+                // 如果明顯是「今年已經過很久」，就視為明年活動
+                if (date.isBefore(today.minusDays(7))) {
+                    date = date.plusYears(1);
+                }
+                return date;
+            } catch (Exception ignored) {}
+        }
+
+        // 4) 12/06、12-06、12.06、12/06–07、12-06~07 …（抓起始日）
+        Pattern p3 = Pattern.compile(
+                "(0?[1-9]|1[0-2])[./\\-](0?[1-9]|[12]\\d|3[01])(?:[\\-~～—至到](0?[1-9]|[12]\\d|3[01]))?"
+        );
+        Matcher m3 = p3.matcher(text);
+        if (m3.find()) {
+            try {
+                int month = Integer.parseInt(m3.group(1));
+                int day = Integer.parseInt(m3.group(2));
+                LocalDate date = LocalDate.of(today.getYear(), month, day);
+                if (date.isBefore(today.minusDays(7))) {
                     date = date.plusYears(1);
                 }
                 return date;
@@ -429,24 +524,7 @@ public class SearchEngine {
         return null;
     }
 
-    private static LocalDate extractDateFromContent(String text, LocalDate today) {
-        if (text == null) return null;
-        String content = text.length() > 8000 ? text.substring(0, 8000) : text;
-
-        String[] hints = {"活動日期", "市集時間", "活動時間", "展覽日期", "日期", "時間"};
-        for (String hint : hints) {
-            int idx = content.indexOf(hint);
-            if (idx >= 0) {
-                int start = Math.max(0, idx - 10);
-                int end = Math.min(content.length(), idx + 80);
-                String slice = content.substring(start, end);
-                LocalDate d = extractDateFromTitle(slice, today);
-                if (d != null) return d;
-            }
-        }
-        return extractDateFromTitle(content, today);
-    }
-
+    /** 從查詢中猜城市（台北 / 臺北 / taipei → 台北） */
     private static String detectCityFromQuery(String query) {
         if (query == null) return "";
         String lower = query.toLowerCase();
@@ -456,6 +534,60 @@ public class SearchEngine {
             }
         }
         return "";
+    }
+
+    /** 正規化城市名稱（臺北 / taipei → 台北） */
+    private static String normalizeCity(String city) {
+        if (city == null) return null;
+        String trimmed = city.trim();
+        if (trimmed.isEmpty()) return trimmed;
+        String lower = trimmed.toLowerCase();
+        for (Map.Entry<String, String> e : CITY_ALIASES.entrySet()) {
+            if (lower.contains(e.getKey().toLowerCase())) {
+                return e.getValue();
+            }
+        }
+        return trimmed;
+    }
+
+    /** 額外城市加權：同城市拉高、不同城市壓低，最後再自己 normalize 一次分數 */
+    private static void applyUserCityBoost(List<PageNode> pages, UserProfile user) {
+        if (pages == null || pages.isEmpty() || user == null) return;
+
+        String userCity = normalizeCity(user.getUserCity());
+        if (userCity == null || userCity.isEmpty()) return;
+
+        // 先做一次 city 調整
+        double max = Double.NEGATIVE_INFINITY;
+        double min = Double.POSITIVE_INFINITY;
+
+        Map<PageNode, Double> newScores = new HashMap<>();
+        for (PageNode p : pages) {
+            double s = p.getTotalScore();
+            String c = normalizeCity(p.getCity());
+
+            if (c != null && !c.isEmpty() && !"全台".equals(c)) {
+                if (c.equals(userCity)) {
+                    s *= 1.3;   // 同城市：拉高分數
+                } else {
+                    s *= 0.5;   // 不同城市：壓低分數
+                }
+            }
+            newScores.put(p, s);
+            max = Math.max(max, s);
+            min = Math.min(min, s);
+        }
+
+        if (!Double.isFinite(max) || !Double.isFinite(min)) return;
+        double range = max - min;
+        if (range < 1e-6) range = 1.0;
+
+        // 再把調整後的分數 normalize 回 10–100 区間
+        for (PageNode p : pages) {
+            double s = newScores.get(p);
+            double normalized = ((s - min) / range) * 90 + 10;
+            p.setTotalScore(Math.round(normalized * 10) / 10.0);
+        }
     }
 
     private static String extractDomain(String url) {
