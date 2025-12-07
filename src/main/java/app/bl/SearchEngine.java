@@ -323,8 +323,8 @@ public class SearchEngine {
     }
 
     private static PageNode createPageNode(GoogleConnector.Result r, String query,
-                                           List<String> queryTokens, String userCity,
-                                           LocalDate today) {
+                                        List<String> queryTokens, String userCity,
+                                        LocalDate today) {
 
         if (shouldExclude(r.title, r.link)) return null;
 
@@ -344,13 +344,12 @@ public class SearchEngine {
             }
         }
 
-        // 先從標題抓城市
+        // 🔧 只用「頁面本身」決定城市，不再從 query / userCity 推測
         String city = LocationRecognizer.extractCity(r.title);
         if (city == null || city.isEmpty()) {
-            city = detectCityFromQuery(query);
-        }
-        if (city == null || city.isEmpty()) {
-            city = (userCity != null) ? userCity : "全台";
+            // 標題暫時抓不到城市 → 設為「全台」
+            // 後面 crawlPageFast 會用內文再試一次抓城市
+            city = "全台";
         }
 
         String domain = extractDomain(r.link);
