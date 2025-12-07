@@ -45,6 +45,18 @@ public class SearchEngine {
             Map.entry("演唱會", List.of("演唱會", "音樂會", "巡迴演唱會")),
             Map.entry("festival", List.of("market", "festival", "fair"))
     );
+        /** 粗略判斷「海外文章」用的關鍵字 */
+    private static final List<String> FOREIGN_KEYWORDS = List.of(
+            "日本", "東京", "大阪", "北海道", "沖繩",
+            "首爾", "釜山", "韓國",
+            "香港", "澳門",
+            "曼谷", "清邁", "泰國",
+            "新加坡", "馬來西亞", "吉隆坡",
+            "紐約", "洛杉磯", "舊金山", "美國",
+            "倫敦", "巴黎", "歐洲", "澳洲", "雪梨", "悉尼",
+            "海外", "國外旅遊"
+    );
+
 
     private static final Map<String, List<String>> EXPANSION = Map.of(
             "市集", List.of("文創市集", "手作市集", "假日市集", "聖誕市集", "創意市集", "跳蚤市集"),
@@ -452,6 +464,13 @@ public class SearchEngine {
      *  - 明確標成別的城市，而且內文也沒提到 userCity → 直接丟掉
      *  - 「全台 / 未寫城市」一律保留，交給 ranking + 城市加權處理
      */
+        /**
+     * 用「page.city + 標題 + 內文」做城市過濾：
+     *  - 明確標成別的城市，而且內文也沒提到 userCity → 丟掉
+     *  - 「全台 / 未寫城市」的頁面，必須在文本出現 userCity 或「大台北 / 雙北 / 北北基」等才保留
+     *  - 額外：如果整篇看起來都是國外關鍵字、幾乎沒有台灣城市 → 視為海外文章，直接丟掉
+     *  - 如果全部被濾掉，就退回原 pages（避免結果為 0）
+     */
     private static List<PageNode> filterByUserCityWithContent(List<PageNode> pages, String userCity) {
         if (pages == null || pages.isEmpty()) return pages;
 
@@ -459,12 +478,21 @@ public class SearchEngine {
         if (normalizedTarget == null || normalizedTarget.isEmpty()) return pages;
 
         String targetLower = normalizedTarget.toLowerCase();
+
+        // 順便準備「所有台灣城市/關鍵字」列表，判斷文章裡到底有沒有提到台灣
+        List<String> taiwanCityTerms = new ArrayList<>();
+        for (String alias : CITY_ALIASES.keySet()) {
+            taiwanCityTerms.add(alias.toLowerCase());
+        }
+        taiwanCityTerms.add("台灣");
+        taiwanCityTerms.add("臺灣");
+
         List<PageNode> kept = new ArrayList<>();
 
         for (PageNode p : pages) {
-            String city = normalizeCity(p.getCity());
-            String title = p.getTitle() != null ? p.getTitle() : "";
-            String text = p.getTextContent() != null ? p.getTextContent() : "";
+            String city  = normalizeCity(p.getCity());
+            String title = (p.getTitle() != null) ? p.getTitle() : "";
+            String text  = (p.getTextContent() != null) ? p.getTextContent() : "";
             String combinedLower = (title + " " + text).toLowerCase();
 
             boolean isAllTaiwan = (city == null || city.isEmpty() || "全台".equals(city));
@@ -472,29 +500,57 @@ public class SearchEngine {
                     city != null && !city.isEmpty() && city.equals(normalizedTarget);
             boolean matchByText = combinedLower.contains(targetLower);
 
-            // 台北特例：大台北 / 雙北 / 北北基 也算有提到台北
+            // 台北特例：出現「大台北、雙北、北北基」也算
             if (!matchByText && "台北".equals(normalizedTarget)) {
                 if (combinedLower.contains("大台北") ||
-                        combinedLower.contains("雙北") ||
-                        combinedLower.contains("北北基")) {
+                    combinedLower.contains("雙北")   ||
+                    combinedLower.contains("北北基")) {
                     matchByText = true;
                 }
             }
 
-            // ✅ 放鬆這裡：
-            // 全台 / 未標城市：一律保留，交給 ranking 處理
+            // ===== 新增：粗略判斷是不是「海外文章」 =====
+            boolean hasTaiwanCityInText = false;
+            for (String term : taiwanCityTerms) {
+                if (combinedLower.contains(term)) {
+                    hasTaiwanCityInText = true;
+                    break;
+                }
+            }
+
+            boolean hasForeignKeyword = false;
+            for (String fk : FOREIGN_KEYWORDS) {
+                if (combinedLower.contains(fk.toLowerCase())) {
+                    hasForeignKeyword = true;
+                    break;
+                }
+            }
+
+            // 如果文章幾乎沒有任何台灣城市字眼，又充滿國外關鍵字 → 視為海外文章，丟掉
+            if (!hasTaiwanCityInText && hasForeignKeyword) {
+                System.out.println("[CityFilter] 判定為海外文章，丟掉: " + truncate(title, 30));
+                continue;
+            }
+            // ===== 海外判斷到這邊結束 =====
+
+            // 明確標示「其他城市」且內文也沒提到 userCity → 直接丟掉
+            if (!isAllTaiwan && !normalizedTarget.equals(city)
+                    && !matchByText && !matchByCityField) {
+                continue;
+            }
+
+            // 「全台 / 未寫城市」：必須在內容有提到 userCity 才保留
             if (isAllTaiwan) {
+                if (matchByText) {
+                    kept.add(p);
+                }
+                continue;
+            }
+
+            // 一般情況：城市欄位是 userCity 或內文有提到 userCity
+            if (matchByCityField || matchByText) {
                 kept.add(p);
-                continue;
             }
-
-            // 明確標示「其他城市」且內文也沒提到 userCity → 丟掉
-            if (!normalizedTarget.equals(city) && !matchByText && !matchByCityField) {
-                continue;
-            }
-
-            // 其他情況：保留
-            kept.add(p);
         }
 
         if (!kept.isEmpty()) {
