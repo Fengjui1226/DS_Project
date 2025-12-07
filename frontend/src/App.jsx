@@ -220,7 +220,7 @@ export default function App() {
     
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 35000); // 15 秒超時
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // ★ 15 秒超時
       
       const res = await fetch(
         `${API_BASE}/search?query=${encodeURIComponent(q)}&city=${encodeURIComponent(apiCity)}&page=${page}`,

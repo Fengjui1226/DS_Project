@@ -133,6 +133,9 @@ public class PageNode {
     public double getScore() { return score; }
     public void setScore(double score) { this.score = score; }
     
+    // ★ 新增：累加分數
+    public void addScore(double bonus) { this.score += bonus; }
+    
     public double getSubPagesScore() { return subPagesScore; }
     public void setSubPagesScore(double score) { this.subPagesScore = score; }
     

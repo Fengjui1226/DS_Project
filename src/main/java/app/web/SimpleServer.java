@@ -1,13 +1,26 @@
 package app.web;
 
-import app.bl.*;
-import com.sun.net.httpserver.*;
-import java.io.*;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+
+import app.bl.KeywordSuggester;
+import app.bl.PageNode;
+import app.bl.SearchEngine;
+import app.bl.SubPageNode;
+import app.bl.UserProfile;
 
 /**
  * SimpleServer v3.0 - 支援爬蟲 + 關鍵字推薦
@@ -147,6 +160,8 @@ public class SimpleServer {
             return;
         }
         
+        long startTime = System.currentTimeMillis();  // ★ 計時開始
+        
         try {
             Map<String, String> params = parseQuery(ex.getRequestURI().getQuery());
             String query = params.getOrDefault("query", "").trim();
@@ -178,6 +193,8 @@ public class SimpleServer {
                 ? results.subList(start, end) 
                 : new ArrayList<>();
             
+            long duration = System.currentTimeMillis() - startTime;  // ★ 計時結束
+            
             // 建構回應
             StringBuilder json = new StringBuilder();
             json.append("{\"success\":true,");
@@ -186,6 +203,7 @@ public class SimpleServer {
             json.append("\"page\":").append(page).append(",");
             json.append("\"totalCount\":").append(totalCount).append(",");
             json.append("\"totalPages\":").append(totalPages).append(",");
+            json.append("\"responseTime\":").append(duration).append(",");  // ★ 新增回應時間
             json.append("\"results\":[");
             
             int rank = start + 1;
