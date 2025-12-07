@@ -120,6 +120,21 @@ public class SearchEngine {
         }
         System.out.println("[Pages] 建立 " + pages.size() + " 個頁面節點");
 
+        // 🆕 嚴格城市過濾：使用者有選城市 → 只保留同城市，其它全部丟掉
+        if (userCity != null && !userCity.isEmpty()) {
+            String finalCity = normalizeCity(userCity);
+            List<PageNode> filtered = new ArrayList<>();
+            for (PageNode p : pages) {
+                String c = normalizeCity(p.getCity());
+                if (c != null && c.equals(finalCity)) {
+                    filtered.add(p);
+                }
+            }
+            System.out.println("[City Filter] 原始 " + pages.size() +
+                    " 筆 → 保留同城市 " + filtered.size() + " 筆（嚴格模式：沒城市/全台/外縣市全部捨棄）");
+            pages = filtered;
+        }
+
         // ================== Step 3: 並行爬取 ==================
         if (ENABLE_CRAWLING && !pages.isEmpty()) {
             long elapsed = System.currentTimeMillis() - startTime;
@@ -323,8 +338,8 @@ public class SearchEngine {
     }
 
     private static PageNode createPageNode(GoogleConnector.Result r, String query,
-                                        List<String> queryTokens, String userCity,
-                                        LocalDate today) {
+                                           List<String> queryTokens, String userCity,
+                                           LocalDate today) {
 
         if (shouldExclude(r.title, r.link)) return null;
 
@@ -344,12 +359,10 @@ public class SearchEngine {
             }
         }
 
-        // 🔧 只用「頁面本身」決定城市，不再從 query / userCity 推測
+        // 只用「頁面本身」決定城市，不從 query/userCity 硬猜
         String city = LocationRecognizer.extractCity(r.title);
         if (city == null || city.isEmpty()) {
-            // 標題暫時抓不到城市 → 設為「全台」
-            // 後面 crawlPageFast 會用內文再試一次抓城市
-            city = "全台";
+            city = "全台";    // 抓不到城市就先標全台，之後嚴格模式會把它踢掉
         }
 
         String domain = extractDomain(r.link);
@@ -361,10 +374,10 @@ public class SearchEngine {
     /**
      * 新版 refineQuery：
      * 1. 沒有活動關鍵字 → 幫忙加一組 (活動 / 展覽 / 演唱會 / 音樂會 / 市集)
-     * 2. 有活動關鍵字 → 只針對那個類別做同義詞擴充（不用再塞一大坨）
-     * 3. 使用者沒寫年份 → 才補「今年 / 明年」
-     * 4. 查詢裡沒城市也沒台灣 → 才補「台灣」
-     * 5. 排除申請 / 辦法 / 徵選 / 招生這類非活動頁
+     * 2. 有活動關鍵字 → 只針對那個類別做同義詞擴充
+     * 3. 沒年份 → 補「今年 or 明年」
+     * 4. 沒城市也沒台灣 → 補「台灣」
+     * 5. 排除申請 / 辦法 / 徵選 / 招生 / 履歷 / 課程簡章...
      */
     private static String refineQuery(String query) {
         String q = (query == null) ? "" : query.trim();
@@ -372,22 +385,18 @@ public class SearchEngine {
 
         String lower = q.toLowerCase();
 
-        // 有沒有城市關鍵字
         boolean hasCity = CITY_ALIASES.keySet().stream()
                 .anyMatch(alias -> lower.contains(alias.toLowerCase()));
 
-        // 有沒有活動類關鍵字
         boolean hasEventWord = EVENT_TERMS.stream()
                 .anyMatch(term -> lower.contains(term.toLowerCase()));
 
-        // 有沒有年份（西元 / 民國 / 今年 / 明年）
         boolean hasYear =
-                lower.matches(".*20\\d{2}.*") ||        // 2025
-                lower.matches(".*1\\d{2}年.*") ||       // 114年
+                lower.matches(".*20\\d{2}.*") ||
+                lower.matches(".*1\\d{2}年.*") ||
                 lower.contains("今年") ||
                 lower.contains("明年");
 
-        // 有沒有出現「台灣 / Taiwan」
         boolean hasTaiwan =
                 lower.contains("台灣") ||
                 lower.contains("臺灣") ||
@@ -395,11 +404,9 @@ public class SearchEngine {
 
         StringBuilder sb = new StringBuilder(q);
 
-        // 1️⃣ 沒有活動詞 → 幫忙加一組大方向活動詞
         if (!hasEventWord) {
             sb.append(" (活動 OR 展覽 OR 演唱會 OR 音樂會 OR 市集)");
         } else {
-            // 2️⃣ 已經有活動詞 → 針對那個類別做同義詞擴充（只擴一種，避免太肥）
             for (Map.Entry<String, List<String>> e : CATEGORY_EXPANSIONS.entrySet()) {
                 String key = e.getKey().toLowerCase();
                 if (lower.contains(key)) {
@@ -415,18 +422,16 @@ public class SearchEngine {
             }
         }
 
-        // 3️⃣ 沒有年份 → 補「今年 / 明年」效果：year OR year+1
         if (!hasYear) {
             int year = LocalDate.now().getYear();
             sb.append(" ").append(year).append(" OR ").append(year + 1);
         }
 
-        // 4️⃣ 沒有城市也沒有台灣 → 補「台灣」避免飄到國外
         if (!hasTaiwan && !hasCity) {
             sb.append(" 台灣");
         }
 
-        // 5️⃣ 排除非活動頁
+        // 這裡就是你問的：這些字是「不要出現」的（加 -）
         sb.append(" -申請 -申請辦法 -徵選 -補助 -招標 -採購 -招生 -簡章 -課程簡章 -履歷");
 
         return sb.toString();
@@ -542,7 +547,6 @@ public class SearchEngine {
                 int month = Integer.parseInt(m2.group(1));
                 int day = Integer.parseInt(m2.group(2));
                 LocalDate date = LocalDate.of(today.getYear(), month, day);
-                // 如果明顯是「今年已經過很久」，就視為明年活動
                 if (date.isBefore(today.minusDays(7))) {
                     date = date.plusYears(1);
                 }
@@ -603,7 +607,6 @@ public class SearchEngine {
         String userCity = normalizeCity(user.getUserCity());
         if (userCity == null || userCity.isEmpty()) return;
 
-        // 先做一次 city 調整
         double max = Double.NEGATIVE_INFINITY;
         double min = Double.POSITIVE_INFINITY;
 
@@ -628,7 +631,6 @@ public class SearchEngine {
         double range = max - min;
         if (range < 1e-6) range = 1.0;
 
-        // 再把調整後的分數 normalize 回 10–100 區間
         for (PageNode p : pages) {
             double s = newScores.get(p);
             double normalized = ((s - min) / range) * 90 + 10;
