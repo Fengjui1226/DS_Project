@@ -6,21 +6,16 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import app.da.GoogleConnector;
 import app.da.LocationRecognizer;
-
-// 同 package 類別
-import app.bl.PageNode;
-import app.bl.SubPageNode;
-import app.bl.Keyword;
-import app.bl.WebCrawler;
-import app.bl.RankCalculator;
-import app.bl.Tree;
-import app.bl.UserProfile;
 
 public class SearchEngine {
 
@@ -47,14 +42,26 @@ public class SearchEngine {
     );
         /** 粗略判斷「海外文章」用的關鍵字 */
     private static final List<String> FOREIGN_KEYWORDS = List.of(
-            "日本", "東京", "大阪", "北海道", "沖繩",
-            "首爾", "釜山", "韓國",
+            // 日本
+            "日本", "東京", "大阪", "北海道", "沖繩", "京都", "奈良", "名古屋", "福岡", "橫濱",
+            // 韓國
+            "首爾", "釜山", "韓國", "濟州", "仁川",
+            // 港澳
             "香港", "澳門",
-            "曼谷", "清邁", "泰國",
-            "新加坡", "馬來西亞", "吉隆坡",
-            "紐約", "洛杉磯", "舊金山", "美國",
-            "倫敦", "巴黎", "歐洲", "澳洲", "雪梨", "悉尼",
-            "海外", "國外旅遊"
+            // 東南亞
+            "曼谷", "清邁", "泰國", "普吉", "芭達雅",
+            "新加坡", "馬來西亞", "吉隆坡", "檳城",
+            "越南", "河內", "胡志明", "峴港",
+            "菲律賓", "宿霧", "馬尼拉",
+            "印尼", "峇里島", "雅加達",
+            // 歐美澳
+            "紐約", "洛杉磯", "舊金山", "美國", "加州",
+            "倫敦", "巴黎", "歐洲", "德國", "法國", "義大利",
+            "澳洲", "雪梨", "悉尼", "墨爾本",
+            // 中國大陸
+            "上海", "北京", "深圳", "廣州", "成都", "杭州",
+            // 泛稱
+            "海外", "國外旅遊", "出國", "境外", "跨國"
     );
 
 
@@ -609,6 +616,7 @@ private static String refineQuery(String query) {
     private static LocalDate parseDate(String text, LocalDate today) {
         if (text == null) return null;
 
+        // 1. 完整西元年格式: 2024/12/25, 2024-12-25, 2024年12月25日
         Pattern p1 = Pattern.compile(
                 "(20\\d{2})[./年\\-](0?[1-9]|1[0-2])[./月\\-](0?[1-9]|[12]\\d|3[01])"
         );
@@ -622,6 +630,7 @@ private static String refineQuery(String query) {
             } catch (Exception ignored) {}
         }
 
+        // 2. 民國年格式: 113年12月25日
         Pattern pRoc = Pattern.compile(
                 "(1\\d{2})年(0?[1-9]|1[0-2])月(0?[1-9]|[12]\\d|3[01])日"
         );
@@ -636,8 +645,9 @@ private static String refineQuery(String query) {
             } catch (Exception ignored) {}
         }
 
+        // 3. 口語化格式: 12月25日、12/25（今年或明年）
         Pattern p2 = Pattern.compile(
-                "(0?[1-9]|1[0-2])月(0?[1-9]|[12]\\d|3[01])(?:[\\-~～—至到](0?[1-9]|[12]\\d|3[01]))?日"
+                "(0?[1-9]|1[0-2])月(0?[1-9]|[12]\\d|3[01])(?:[\\-~～—至到](0?[1-9]|[12]\\d|3[01]))?日?"
         );
         Matcher m2 = p2.matcher(text);
         if (m2.find()) {
@@ -645,6 +655,7 @@ private static String refineQuery(String query) {
                 int month = Integer.parseInt(m2.group(1));
                 int day = Integer.parseInt(m2.group(2));
                 LocalDate date = LocalDate.of(today.getYear(), month, day);
+                // 如果日期已過超過 7 天，推測為明年
                 if (date.isBefore(today.minusDays(7))) {
                     date = date.plusYears(1);
                 }
@@ -652,6 +663,7 @@ private static String refineQuery(String query) {
             } catch (Exception ignored) {}
         }
 
+        // 4. 簡寫格式: 12/25, 12-25
         Pattern p3 = Pattern.compile(
                 "(0?[1-9]|1[0-2])[./\\-](0?[1-9]|[12]\\d|3[01])(?:[\\-~～—至到](0?[1-9]|[12]\\d|3[01]))?"
         );
@@ -666,6 +678,12 @@ private static String refineQuery(String query) {
                 }
                 return date;
             } catch (Exception ignored) {}
+        }
+        
+        // 5. 特殊格式: 即日起、每週六日、長期展出（視為近期活動）
+        if (text.contains("即日起") || text.contains("現正展出") || 
+            text.contains("常設展") || text.contains("長期展出")) {
+            return today.plusDays(30); // 視為一個月內的活動
         }
 
         return null;
@@ -696,42 +714,14 @@ private static String refineQuery(String query) {
         return trimmed;
     }
 
-    /** 額外城市加權：同城市拉高、不同城市壓低，最後再 normalize 一次分數 */
+    /** 
+     * 城市加權已在 RankCalculator 中處理，此處僅做正規化
+     * 避免重複加權導致偏差過大
+     */
     private static void applyUserCityBoost(List<PageNode> pages, UserProfile user) {
-        if (pages == null || pages.isEmpty() || user == null) return;
-
-        String userCity = normalizeCity(user.getUserCity());
-        if (userCity == null || userCity.isEmpty()) return;
-
-        double max = Double.NEGATIVE_INFINITY;
-        double min = Double.POSITIVE_INFINITY;
-
-        Map<PageNode, Double> newScores = new HashMap<>();
-        for (PageNode p : pages) {
-            double s = p.getTotalScore();
-            String c = normalizeCity(p.getCity());
-
-            if (c != null && !c.isEmpty() && !"全台".equals(c)) {
-                if (c.equals(userCity)) {
-                    s *= 1.3;
-                } else {
-                    s *= 0.5;
-                }
-            }
-            newScores.put(p, s);
-            max = Math.max(max, s);
-            min = Math.min(min, s);
-        }
-
-        if (!Double.isFinite(max) || !Double.isFinite(min)) return;
-        double range = max - min;
-        if (range < 1e-6) range = 1.0;
-
-        for (PageNode p : pages) {
-            double s = newScores.get(p);
-            double normalized = ((s - min) / range) * 90 + 10;
-            p.setTotalScore(Math.round(normalized * 10) / 10.0);
-        }
+        // 城市加權由 RankCalculator 統一處理
+        // 這裡不再重複處理，避免同城活動被過度提升
+        // 如需調整權重，請修改 RankCalculator.java 第 231-240 行
     }
 
     private static String extractDomain(String url) {
