@@ -77,55 +77,102 @@ public class WebCrawler {
     );
 
     /**
-     * 爬取單一網頁
+     * 爬取單一網頁（含重試機制）
      */
     public static CrawlResult crawl(String url) {
+        return crawlWithRetry(url, 2); // 最多重試 2 次
+    }
+    
+    private static CrawlResult crawlWithRetry(String url, int maxRetries) {
         CrawlResult result = new CrawlResult(url);
+        Exception lastError = null;
         
-        try {
-            if (!isValidUrl(url)) {
-                result.setError("Invalid URL");
+        for (int attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                if (!isValidUrl(url)) {
+                    result.setError("Invalid URL");
+                    return result;
+                }
+                
+                // 輪替 User-Agent
+                String userAgent = USER_AGENTS.get(userAgentIndex++ % USER_AGENTS.size());
+                
+                HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("User-Agent", userAgent)
+                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9")
+                    .header("Accept-Language", "zh-TW,zh;q=0.9,en;q=0.8")
+                    .header("Accept-Encoding", "identity")
+                    .timeout(Duration.ofSeconds(REQUEST_TIMEOUT_SECONDS))
+                    .GET()
+                    .build();
+                
+                HttpResponse<String> response = HTTP_CLIENT.send(request, 
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                
+                int status = response.statusCode();
+                
+                // 處理常見 HTTP 狀態碼
+                if (status == 429) { // Too Many Requests
+                    if (attempt < maxRetries) {
+                        Thread.sleep(1000 * (attempt + 1)); // 指數退避
+                        continue;
+                    }
+                    result.setError("Rate limited");
+                    return result;
+                }
+                
+                if (status == 403 || status == 401) {
+                    result.setError("Access denied");
+                    return result;
+                }
+                
+                if (status >= 500 && attempt < maxRetries) {
+                    Thread.sleep(500 * (attempt + 1));
+                    continue;
+                }
+                
+                if (status != 200) {
+                    result.setError("HTTP " + status);
+                    return result;
+                }
+                
+                String html = response.body();
+                if (html.length() > MAX_CONTENT_LENGTH) {
+                    html = html.substring(0, MAX_CONTENT_LENGTH);
+                }
+                
+                // 解析
+                result.setHtml(html);
+                result.setTitle(extractTitle(html));
+                result.setTextContent(extractTextContent(html));
+                result.setLinks(extractLinks(html, url));
+                result.setSuccess(true);
+                
                 return result;
+                
+            } catch (java.net.http.HttpTimeoutException e) {
+                lastError = e;
+                if (attempt < maxRetries) {
+                    try { Thread.sleep(500); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                    continue;
+                }
+                result.setError("Timeout");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                result.setError("Interrupted");
+            } catch (Exception e) {
+                lastError = e;
+                if (attempt < maxRetries) {
+                    try { Thread.sleep(300); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                    continue;
+                }
+                result.setError(e.getClass().getSimpleName() + ": " + e.getMessage());
             }
-            
-            // 輪替 User-Agent
-            String userAgent = USER_AGENTS.get(userAgentIndex++ % USER_AGENTS.size());
-            
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("User-Agent", userAgent)
-                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9")
-                .header("Accept-Language", "zh-TW,zh;q=0.9,en;q=0.8")
-                .header("Accept-Encoding", "identity")  // 不要壓縮，簡化處理
-                .timeout(Duration.ofSeconds(REQUEST_TIMEOUT_SECONDS))
-                .GET()
-                .build();
-            
-            HttpResponse<String> response = HTTP_CLIENT.send(request, 
-                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            
-            int status = response.statusCode();
-            if (status != 200) {
-                result.setError("HTTP " + status);
-                return result;
-            }
-            
-            String html = response.body();
-            if (html.length() > MAX_CONTENT_LENGTH) {
-                html = html.substring(0, MAX_CONTENT_LENGTH);
-            }
-            
-            // 解析
-            result.setHtml(html);
-            result.setTitle(extractTitle(html));
-            result.setTextContent(extractTextContent(html));
-            result.setLinks(extractLinks(html, url));
-            result.setSuccess(true);
-            
-        } catch (java.net.http.HttpTimeoutException e) {
-            result.setError("Timeout");
-        } catch (Exception e) {
-            result.setError(e.getClass().getSimpleName());
+        }
+        
+        if (lastError != null && result.getError() == null) {
+            result.setError(lastError.getClass().getSimpleName());
         }
         
         return result;
