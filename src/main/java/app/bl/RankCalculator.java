@@ -186,16 +186,26 @@ public class RankCalculator {
             score *= (1.0 + matchRatio); // 最多多 100%
         }
 
-        // 5️⃣ 日期新鮮度：未來加分、過期扣分
+        // 5️⃣ 日期新鮮度：未來加分、過期扣分 + 查詢時間範圍加成
         LocalDate d = p.getEventDate();
         if (d != null) {
             long days = ChronoUnit.DAYS.between(today, d);
+            
+            // 基本時間分數
             if (days >= 0 && days <= 60) {
                 score += 12;            // 兩個月內活動強力加分
             } else if (days > 60) {
                 score += 4;             // 未來但較遠一點
             } else { // 已經過期
                 score -= 18;            // 過期活動明顯扣分
+            }
+            
+            // 查詢時間範圍額外加成
+            if (originalQuery != null) {
+                QueryUnderstanding.DateRange queryDateRange = QueryUnderstanding.getDateRange(originalQuery);
+                if (queryDateRange != null && queryDateRange.contains(d)) {
+                    score += 25;        // 符合查詢時間範圍大加分
+                }
             }
         }
 
@@ -244,9 +254,9 @@ public class RankCalculator {
     }
 
     /**
-     * 平台幾乎平等：
-     * - 預設 1.0
-     * - 文化 / 觀光相關的政府網站：1.1（僅微小加分）
+     * 來源加權：
+     * - 預設 1.0（大部分網站平等）
+     * - 文化 / 觀光相關的政府網站：1.1（資訊較準確）
      */
     private static double calculateSourceMultiplier(String domain) {
         if (domain == null || domain.isEmpty()) return 1.0;
@@ -254,9 +264,9 @@ public class RankCalculator {
 
         if (d.endsWith(".gov.tw")) {
             if (d.contains("culture") || d.contains("moc") || d.contains("tourism")) {
-                return 1.1;   // 文化 / 觀光單位官網：資訊較準
+                return 1.1;   // 文化 / 觀光單位官網
             }
-            return 1.0;       // 其他政府網站：不特別加減
+            return 1.0;
         }
 
         // 其他一律平等

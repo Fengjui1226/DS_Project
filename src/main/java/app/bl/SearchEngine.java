@@ -6,16 +6,21 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import app.da.GoogleConnector;
 import app.da.LocationRecognizer;
+
+// 同 package 類別
+import app.bl.PageNode;
+import app.bl.SubPageNode;
+import app.bl.Keyword;
+import app.bl.WebCrawler;
+import app.bl.RankCalculator;
+import app.bl.Tree;
+import app.bl.UserProfile;
 
 public class SearchEngine {
 
@@ -95,9 +100,9 @@ public class SearchEngine {
     // =====================================================
 
     public static List<PageNode> search(String query, UserProfile user) throws Exception {
-        System.out.println("\n╔══════════════════════════════════════════╗");
-        System.out.println("║   🔍 EventFinder v4.2 (城市 + 內文強化版) ║");
-        System.out.println("╚══════════════════════════════════════════╝");
+        System.out.println("\n╔═══════════════════════════════════════════════════════╗");
+        System.out.println("║   🔍 EventFinder v5.0 (TF-IDF + 結構化 + 去重)        ║");
+        System.out.println("╚═══════════════════════════════════════════════════════╝");
         System.out.println("[Query] " + query);
 
         long startTime = System.currentTimeMillis();
@@ -114,10 +119,17 @@ public class SearchEngine {
             }
         }
 
-        // 2. 類別關鍵字擴充（市集 → 文創市集…）
-        query = expandQuery(query);
+        // 2. 查詢理解（意圖識別 + 時間解析 + 同義詞擴展）
+        QueryUnderstanding.ParsedQuery parsedQuery = QueryUnderstanding.parse(query);
+        System.out.println("[QueryUnderstanding] " + parsedQuery.primaryIntent);
+        if (parsedQuery.city != null) System.out.println("  → 城市: " + parsedQuery.city);
+        if (parsedQuery.eventType != null) System.out.println("  → 類型: " + parsedQuery.eventType);
+        if (parsedQuery.dateRangeStart != null) System.out.println("  → 日期: " + parsedQuery.dateRangeStart + " ~ " + parsedQuery.dateRangeEnd);
 
-        // 3. 給 Google 用的 query 微調（年份 / 排除「申請辦法」等）
+        // 3. 類別關鍵字擴充（市集 → 文創市集…）
+        query = expandQuery(parsedQuery.expandedQuery);
+
+        // 4. 給 Google 用的 query 微調（年份 / 排除「申請辦法」等）
         String refinedQuery = refineQuery(query);
         System.out.println("[Refined] " + refinedQuery);
 
@@ -173,8 +185,20 @@ public class SearchEngine {
         System.out.printf("[Filter] 未過期: %d, 已過期: %d%n",
                 validPages.size(), expiredPages.size());
 
-        // ================== Step 4: 排名計算 ==================
-        System.out.println("\n[Step 4] 計算分數...");
+        // ================== Step 4: 進階處理 ==================
+        System.out.println("\n[Step 4] 進階處理...");
+        
+        // 4.1 TF-IDF 權重計算
+        TFIDFCalculator.applyTFIDFScores(pagesToRank, query);
+        
+        // 4.2 結構化資訊提取（日期、場館、票價等）
+        EventInfoExtractor.applyCompletenessBonus(pagesToRank);
+        
+        // 4.3 去重（合併相似結果）
+        pagesToRank = Deduplicator.deduplicate(pagesToRank);
+
+        // ================== Step 5: 排名計算 ==================
+        System.out.println("\n[Step 5] 計算最終分數...");
         RankCalculator.rank(pagesToRank, user, query);
 
         // 額外城市加權：使用者選城市時，加強該城市，壓低其他縣市
