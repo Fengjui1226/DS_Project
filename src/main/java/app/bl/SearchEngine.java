@@ -43,18 +43,29 @@ public class SearchEngine {
             Map.entry("festival", List.of("market", "festival", "fair"))
     );
 
-    // 🚨 新增：海外關鍵字（用於過濾）
+    // 🚨 新增：海外關鍵字（用於過濾）- v5.3 強化版
     private static final List<String> FOREIGN_KEYWORDS = List.of(
-            // 日本
-            "日本", "東京", "大阪", "北海道", "沖繩", "京都", "奈良", "名古屋", "福岡", "橫濱", "涉谷", "新宿",
+            // 日本 (全面)
+            "日本", "東京", "大阪", "北海道", "沖繩", "京都", "奈良", "名古屋", "福岡", "橫濱", 
+            "涉谷", "新宿", "銀座", "池袋", "原宿", "淺草", "秋葉原", "神戶", "廣島", "仙台",
+            "金澤", "札幌", "函館", "輕井澤", "富士山", "鎌倉", "箱根", "河口湖",
             // 韓國
-            "首爾", "釜山", "韓國", "濟州", "仁川",
+            "首爾", "釜山", "韓國", "濟州", "仁川", "明洞", "弘大", "江南", "東大門",
             // 港澳 & 中國
-            "香港", "澳門", "上海", "北京", "深圳", "廣州",
-            // 東南亞 & 歐美
-            "曼谷", "泰國", "新加坡", "馬來西亞", "越南", "美國", "歐洲", "倫敦", "巴黎",
+            "香港", "澳門", "上海", "北京", "深圳", "廣州", "成都", "杭州", "蘇州", "西安",
+            // 東南亞
+            "曼谷", "泰國", "新加坡", "馬來西亞", "越南", "峇里島", "印尼", "菲律賓", "吉隆坡",
+            "清邁", "普吉島", "河內", "胡志明", "柬埔寨", "寮國", "緬甸",
+            // 紐澳
+            "紐西蘭", "新西蘭", "奧克蘭", "威靈頓", "基督城", "皇后鎮", "澳洲", "澳大利亞",
+            "雪梨", "悉尼", "墨爾本", "布里斯本", "伯斯", "黃金海岸",
+            // 歐美
+            "美國", "歐洲", "倫敦", "巴黎", "紐約", "洛杉磯", "舊金山", "芝加哥", "西雅圖",
+            "德國", "法國", "義大利", "西班牙", "荷蘭", "瑞士", "奧地利", "捷克",
+            "羅馬", "米蘭", "佛羅倫斯", "巴塞隆納", "阿姆斯特丹", "維也納", "布拉格",
             // 旅遊類雜訊
-            "機票", "自由行", "入境", "簽證", "匯率", "代購"
+            "機票", "自由行", "入境", "簽證", "匯率", "代購", "旅遊攻略", "行程規劃",
+            "海外", "出國", "國外", "境外", "跨境", "航班"
     );
 
     private static final Map<String, List<String>> EXPANSION = Map.of(
@@ -449,9 +460,11 @@ public class SearchEngine {
             sb.append(" 台灣");
         }
 
-        // 🚨 這裡保留原有的排除，並加上海外排除
+        // 🚨 這裡保留原有的排除，並加上海外排除 (v5.3 強化)
         sb.append(" -申請 -申請辦法 -徵選 -補助 -招標 -採購 -招生 -簡章 -課程簡章 -履歷");
-        sb.append(" -日本 -東京 -大阪 -首爾 -韓國 -機票 -自由行 -簽證 -入境 -代購"); // 新增
+        sb.append(" -日本 -東京 -大阪 -首爾 -韓國 -機票 -自由行 -簽證 -入境 -代購");
+        sb.append(" -紐西蘭 -新西蘭 -奧克蘭 -澳洲 -雪梨 -墨爾本 -香港 -曼谷 -新加坡");
+        sb.append(" -北海道 -沖繩 -京都 -峇里島 -普吉島 -濟州 -旅遊攻略");
 
         return sb.toString();
     }
@@ -481,30 +494,109 @@ public class SearchEngine {
     // 工具函式：城市過濾 / 排除網址 / 日期解析
     // =====================================================
 
-    // 🚨 新增：海外內容判斷邏輯
+    // 🚨 v5.3 強化版：海外內容判斷邏輯
     private static boolean isLikelyForeign(String title, String content) {
         String text = (title + " " + content).toLowerCase();
         
-        // 檢查是否有海外關鍵字
-        boolean hasForeign = false;
+        // 計算海外關鍵字出現次數
+        int foreignCount = 0;
+        String matchedForeign = "";
         for (String key : FOREIGN_KEYWORDS) {
-            if (text.contains(key.toLowerCase())) {
-                hasForeign = true;
+            String keyLower = key.toLowerCase();
+            if (text.contains(keyLower)) {
+                foreignCount++;
+                if (matchedForeign.isEmpty()) matchedForeign = key;
+            }
+        }
+        
+        if (foreignCount == 0) return false;
+        
+        // 計算台灣關鍵字出現次數
+        int taiwanCount = 0;
+        if (text.contains("台灣") || text.contains("臺灣") || text.contains("taiwan")) {
+            taiwanCount += 2; // 明確提台灣，加權
+        }
+        for (String alias : CITY_ALIASES.keySet()) {
+            if (text.contains(alias.toLowerCase())) {
+                taiwanCount++;
+            }
+        }
+        // 額外的台灣地標關鍵字
+        String[] taiwanLandmarks = {"華山", "松菸", "駁二", "高流", "北流", "小巨蛋", "大巨蛋", 
+            "信義區", "西門町", "忠孝", "中山", "士林", "淡水", "九份", "平溪", "陽明山"};
+        for (String landmark : taiwanLandmarks) {
+            if (text.contains(landmark.toLowerCase())) {
+                taiwanCount++;
+            }
+        }
+        
+        // 🔑 判斷邏輯：
+        // - 如果海外關鍵字 >= 2 且 台灣關鍵字 < 2，幾乎確定是海外
+        // - 如果海外關鍵字 = 1 且 台灣關鍵字 = 0，很可能是海外
+        // - 如果標題就含海外地名，且標題無台灣地名，直接判定海外
+        
+        String titleLower = title.toLowerCase();
+        boolean titleHasForeign = false;
+        for (String key : FOREIGN_KEYWORDS) {
+            if (titleLower.contains(key.toLowerCase())) {
+                titleHasForeign = true;
                 break;
             }
         }
-        if (!hasForeign) return false;
-
-        // 如果有海外關鍵字，但也有台灣關鍵字，可能是「日本展在台灣」，所以不算海外
-        return !hasTaiwanCity(text);
+        
+        boolean titleHasTaiwan = false;
+        if (titleLower.contains("台灣") || titleLower.contains("臺灣") || titleLower.contains("taiwan")) {
+            titleHasTaiwan = true;
+        } else {
+            for (String alias : CITY_ALIASES.keySet()) {
+                if (titleLower.contains(alias.toLowerCase())) {
+                    titleHasTaiwan = true;
+                    break;
+                }
+            }
+        }
+        
+        // 標題有海外地名但無台灣 → 判定為海外
+        if (titleHasForeign && !titleHasTaiwan) {
+            return true;
+        }
+        
+        // 海外關鍵字多於台灣關鍵字很多 → 判定為海外
+        if (foreignCount >= 2 && taiwanCount < 2) {
+            return true;
+        }
+        
+        // 只有海外沒有台灣 → 判定為海外
+        if (foreignCount >= 1 && taiwanCount == 0) {
+            return true;
+        }
+        
+        return false;
     }
 
+    // v5.3 強化：台灣城市/地標判斷
     private static boolean hasTaiwanCity(String text) {
         String lower = text.toLowerCase();
+        // 明確的台灣關鍵字
         if (lower.contains("台灣") || lower.contains("臺灣") || lower.contains("taiwan")) return true;
+        
+        // 台灣城市
         for (String alias : CITY_ALIASES.keySet()) {
             if (lower.contains(alias.toLowerCase())) return true;
         }
+        
+        // 台灣知名地標/場館
+        String[] taiwanLandmarks = {
+            "華山", "松菸", "駁二", "高流", "北流", "小巨蛋", "大巨蛋", "兩廳院", "國家音樂廳",
+            "故宮", "北美館", "當代藝術館", "科博館", "海生館", "衛武營", "信義區", "西門町",
+            "忠孝", "中山", "士林", "淡水", "九份", "平溪", "陽明山", "墾丁", "日月潭",
+            "阿里山", "太魯閣", "清境", "台東", "花蓮", "宜蘭", "澎湖", "金門", "馬祖",
+            "草悟道", "勤美", "逢甲", "一中街", "東海", "中友", "新光三越", "sogo", "遠百"
+        };
+        for (String landmark : taiwanLandmarks) {
+            if (lower.contains(landmark.toLowerCase())) return true;
+        }
+        
         return false;
     }
 

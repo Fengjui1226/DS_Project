@@ -9,14 +9,12 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * RankCalculator v3.3 - 內容導向、平台幾乎平等版 + 城市加權
+ * RankCalculator v3.4 - 加入海外內容懲罰機制
  *
  * 主要設計：
  * 1. 以「關鍵字匹配 + 內文完整度 + 日期新鮮度」為主
- * 2. 不再對售票平台 / 活動平台給超大加權，大家幾乎平等
- * 3. 只保留「文化 / 觀光類政府網站」一點點加分（資訊較可靠）
- * 4. 同城活動明顯優先：同城市放大權重，不同城市降低權重
- * 5. 會吃到 PageNode 在爬蟲階段累積的 score（內文 match 等）
+ * 2. 同城活動優先
+ * 3. 🚨 新增：針對漏網的海外內容進行重扣分
  */
 public class RankCalculator {
 
@@ -27,11 +25,11 @@ public class RankCalculator {
         "輔大", "東吳", "淡江", "文化", "銘傳", "世新", "實踐", "逢甲", "元智", "長庚",
         // 場館
         "華山", "松菸", "駁二", "小巨蛋", "大巨蛋", "國家音樂廳", "兩廳院", "故宮",
-        "北美館", "當代藝術館", "科博館", "科工館", "海生館",
+        "北美館", "當代藝術館", "科博館", "科工館", "海生館", "衛武營", "高流", "北流",
         // 品牌活動
         "簡單生活節", "大港開唱", "覺醒音樂祭", "春浪", "貢寮海洋音樂祭",
         // 地標
-        "信義區", "西門", "東區", "大安", "士林"
+        "信義區", "西門", "東區", "大安", "士林", "勤美", "草悟道"
     )));
 
     // ===== 申請/徵選類懲罰 =====
@@ -40,6 +38,11 @@ public class RankCalculator {
         "招標", "採購", "規定", "須知", "下載"
     );
     private static final double APPLICATION_PENALTY = 0.3;   // 中度懲罰
+
+    // 🚨 新增：海外關鍵字懲罰 (如果漏網之魚跑到這裡，再次重扣分)
+    private static final Set<String> FOREIGN_PENALTY_KEYWORDS = Set.of(
+        "東京", "大阪", "京都", "北海道", "首爾", "釜山", "曼谷", "機票", "入境", "簽證"
+    );
 
     // ===== 活動類型加分 =====
     private static final Map<String, Double> EVENT_TYPE_BOOST = Map.ofEntries(
@@ -163,6 +166,24 @@ public class RankCalculator {
         // 有指定專有名詞但完全沒對到 → 懲罰
         if (!properNouns.isEmpty() && properNounMatches == 0) {
             score -= 20;
+        }
+
+        // 🚨 2.5 海外內容懲罰 (New!)
+        // 如果標題或內文出現海外關鍵字，且沒有「台灣/台北」等解藥，就重扣分
+        boolean isForeign = false;
+        for (String fk : FOREIGN_PENALTY_KEYWORDS) {
+            if (titleLower.contains(fk) || contentLower.contains(fk)) {
+                isForeign = true;
+                break;
+            }
+        }
+        if (isForeign) {
+            boolean hasTaiwan = titleLower.contains("台灣") || titleLower.contains("台北") || titleLower.contains("taipei") ||
+                                contentLower.contains("台灣") || contentLower.contains("台北") || contentLower.contains("taipei");
+            if (!hasTaiwan) {
+                score -= 50; // 重扣 50 分
+                System.out.println("  ⚠️ 發現疑似海外內容扣分: " + title);
+            }
         }
 
         // 3️⃣ 一般關鍵字匹配：標題 > 內文
