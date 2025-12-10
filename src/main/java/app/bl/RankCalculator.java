@@ -255,7 +255,8 @@ public class RankCalculator {
             }
         }
 
-        // 🔟 城市匹配：同城大加分，異城明顯降分；「全台」不調整
+        // 🔟 城市匹配 v6.0：降低城市權重差異（因為 SearchEngine 已經做了城市過濾）
+        // 此處的 userCity 實際上是 effectiveCity（查詢城市優先）
         String userCity = (user != null) ? user.getUserCity() : null;
         String pageCity = p.getCity();
 
@@ -263,11 +264,11 @@ public class RankCalculator {
                 && !"全台".equals(pageCity)) {
 
             if (pageCity.equals(userCity)) {
-                // 同城市：加大權重，讓本地活動優先出現在前面
-                score *= 1.4;
+                // 同城市：輕微加分（前面已過濾，這裡只做微調）
+                score *= 1.2;
             } else {
-                // 不同城市：明顯降低權重
-                score *= 0.6;
+                // 不同城市：輕微降分（可能是內文提到目標城市的全台活動）
+                score *= 0.8;
             }
         }
 

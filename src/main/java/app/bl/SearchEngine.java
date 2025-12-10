@@ -18,14 +18,22 @@ import java.util.stream.Collectors;
 import app.da.GoogleConnector;
 import app.da.LocationRecognizer;
 
+/**
+ * SearchEngine v6.0 - 城市優先權修復版
+ * 
+ * 核心修復：
+ * 1. 查詢中的城市 > 選單選擇的城市 > GPS 定位城市
+ * 2. 統一使用 "effectiveCity" 貫穿整個搜尋流程
+ * 3. 優化海外內容過濾效能
+ * 4. 改善日期處理邏輯
+ */
 public class SearchEngine {
 
-    // 🔧 設定：Google 抓 40 筆，但只爬前 15 筆以避免 Timeout
     private static final int MAX_GOOGLE_RESULTS = 40;
-    private static final int MAX_DEEP_CRAWL_COUNT = 15; // 新增：限制深度爬蟲數量
+    private static final int MAX_DEEP_CRAWL_COUNT = 15;
     private static final boolean ENABLE_CRAWLING = true;
-    private static final int SEARCH_TIMEOUT_MS = 8000;      // 整體搜尋最多 8 秒
-    private static final int CRAWL_PARALLEL_LIMIT = 15;     // 同時爬取數量
+    private static final int SEARCH_TIMEOUT_MS = 8000;
+    private static final int CRAWL_PARALLEL_LIMIT = 15;
     private static final ExecutorService CRAWL_EXECUTOR =
             Executors.newFixedThreadPool(CRAWL_PARALLEL_LIMIT);
 
@@ -43,27 +51,19 @@ public class SearchEngine {
             Map.entry("festival", List.of("market", "festival", "fair"))
     );
 
-    // 🚨 新增：海外關鍵字（用於過濾）- v5.3 強化版
-    private static final List<String> FOREIGN_KEYWORDS = List.of(
-            // 日本 (全面)
+    private static final Set<String> FOREIGN_KEYWORDS = Set.of(
             "日本", "東京", "大阪", "北海道", "沖繩", "京都", "奈良", "名古屋", "福岡", "橫濱", 
             "涉谷", "新宿", "銀座", "池袋", "原宿", "淺草", "秋葉原", "神戶", "廣島", "仙台",
             "金澤", "札幌", "函館", "輕井澤", "富士山", "鎌倉", "箱根", "河口湖",
-            // 韓國
             "首爾", "釜山", "韓國", "濟州", "仁川", "明洞", "弘大", "江南", "東大門",
-            // 港澳 & 中國
             "香港", "澳門", "上海", "北京", "深圳", "廣州", "成都", "杭州", "蘇州", "西安",
-            // 東南亞
             "曼谷", "泰國", "新加坡", "馬來西亞", "越南", "峇里島", "印尼", "菲律賓", "吉隆坡",
             "清邁", "普吉島", "河內", "胡志明", "柬埔寨", "寮國", "緬甸",
-            // 紐澳
             "紐西蘭", "新西蘭", "奧克蘭", "威靈頓", "基督城", "皇后鎮", "澳洲", "澳大利亞",
             "雪梨", "悉尼", "墨爾本", "布里斯本", "伯斯", "黃金海岸",
-            // 歐美
             "美國", "歐洲", "倫敦", "巴黎", "紐約", "洛杉磯", "舊金山", "芝加哥", "西雅圖",
             "德國", "法國", "義大利", "西班牙", "荷蘭", "瑞士", "奧地利", "捷克",
             "羅馬", "米蘭", "佛羅倫斯", "巴塞隆納", "阿姆斯特丹", "維也納", "布拉格",
-            // 旅遊類雜訊
             "機票", "自由行", "入境", "簽證", "匯率", "代購", "旅遊攻略", "行程規劃",
             "海外", "出國", "國外", "境外", "跨境", "航班"
     );
@@ -76,14 +76,24 @@ public class SearchEngine {
             "運動", List.of("路跑", "馬拉松", "健走", "運動賽事", "自行車")
     );
 
-    /** 城市同義字 → 正規化城市名稱 */
     private static final Map<String, String> CITY_ALIASES = Map.ofEntries(
             Map.entry("台北", "台北"), Map.entry("臺北", "台北"), Map.entry("taipei", "台北"),
             Map.entry("新北", "新北"),
             Map.entry("台中", "台中"), Map.entry("臺中", "台中"), Map.entry("taichung", "台中"),
             Map.entry("台南", "台南"), Map.entry("臺南", "台南"), Map.entry("tainan", "台南"),
             Map.entry("高雄", "高雄"), Map.entry("kaohsiung", "高雄"),
-            Map.entry("桃園", "桃園"), Map.entry("基隆", "基隆"), Map.entry("新竹", "新竹")
+            Map.entry("桃園", "桃園"), Map.entry("基隆", "基隆"), Map.entry("新竹", "新竹"),
+            Map.entry("嘉義", "嘉義"), Map.entry("花蓮", "花蓮"), Map.entry("台東", "台東"),
+            Map.entry("宜蘭", "宜蘭"), Map.entry("屏東", "屏東"), Map.entry("彰化", "彰化"),
+            Map.entry("南投", "南投"), Map.entry("苗栗", "苗栗"), Map.entry("雲林", "雲林")
+    );
+
+    private static final Set<String> TAIWAN_LANDMARKS = Set.of(
+            "華山", "松菸", "駁二", "高流", "北流", "小巨蛋", "大巨蛋", "兩廳院", "國家音樂廳",
+            "故宮", "北美館", "當代藝術館", "科博館", "海生館", "衛武營", "信義區", "西門町",
+            "忠孝", "中山", "士林", "淡水", "九份", "平溪", "陽明山", "墾丁", "日月潭",
+            "阿里山", "太魯閣", "清境", "草悟道", "勤美", "逢甲", "一中街", "東海",
+            "新光三越", "sogo", "遠百", "誠品", "國父紀念館", "中正紀念堂"
     );
 
     private static final Set<String> EXCLUDED_DOMAINS = Set.of(
@@ -94,42 +104,45 @@ public class SearchEngine {
     private static Tree lastSearchTree;
     private static List<PageNode> lastResults = new ArrayList<>();
 
-    // =====================================================
-    // 主流程
-    // =====================================================
-
     public static List<PageNode> search(String query, UserProfile user) throws Exception {
         System.out.println("\n╔═══════════════════════════════════════════════════════╗");
-        System.out.println("║   🔍 EventFinder v5.2 (Foreign Filter Added)          ║");
+        System.out.println("║   🔍 EventFinder v6.0 (City Priority Fixed)           ║");
         System.out.println("╚═══════════════════════════════════════════════════════╝");
         System.out.println("[Query] " + query);
 
         long startTime = System.currentTimeMillis();
         LocalDate today = LocalDate.now();
 
-        // 1. 若使用者有設定城市，但 query 沒寫城市 → 幫他加上（只是給 Google 用）
+        // 核心修復：建立城市優先權
+        // 優先權：查詢中的城市 > UserProfile 的城市（選單/定位）
+        
+        String queryCity = detectCityFromQuery(query);
         String userCity = (user != null) ? user.getUserCity() : null;
-        if (userCity != null && !userCity.isEmpty()) {
-            String queryLower = query.toLowerCase();
-            boolean hasCity = CITY_ALIASES.keySet().stream()
-                    .anyMatch(alias -> queryLower.contains(alias.toLowerCase()));
-            if (!hasCity) {
-                query = userCity + " " + query;
-            }
+        
+        String effectiveCity;
+        if (queryCity != null && !queryCity.isEmpty()) {
+            effectiveCity = queryCity;
+            System.out.println("[CityPriority] 使用查詢中的城市: " + effectiveCity);
+        } else if (userCity != null && !userCity.isEmpty()) {
+            effectiveCity = userCity;
+            System.out.println("[CityPriority] 使用定位/選單城市: " + effectiveCity);
+        } else {
+            effectiveCity = null;
+            System.out.println("[CityPriority] 無城市限制，搜尋全台");
         }
 
-        // 2. 查詢理解（意圖識別 + 時間解析 + 同義詞擴展）
-        QueryUnderstanding.ParsedQuery parsedQuery = QueryUnderstanding.parse(query);
+        String googleQuery = query;
+        if (queryCity == null && effectiveCity != null) {
+            googleQuery = effectiveCity + " " + query;
+        }
+
+        QueryUnderstanding.ParsedQuery parsedQuery = QueryUnderstanding.parse(googleQuery);
         System.out.println("[QueryUnderstanding] " + parsedQuery.primaryIntent);
         
-        // 3. 類別關鍵字擴充
-        query = expandQuery(parsedQuery.expandedQuery);
-
-        // 4. 給 Google 用的 query 微調（年份 / 排除「申請辦法」/ 🚨 排除「日本」）
-        String refinedQuery = refineQuery(query);
+        googleQuery = expandQuery(parsedQuery.expandedQuery);
+        String refinedQuery = refineQuery(googleQuery);
         System.out.println("[Refined] " + refinedQuery);
 
-        // ================== Step 1: Google ==================
         System.out.println("\n[Step 1] 呼叫 Google API...");
         List<GoogleConnector.Result> googleResults =
                 GoogleConnector.search(refinedQuery, MAX_GOOGLE_RESULTS, 3000); 
@@ -137,19 +150,15 @@ public class SearchEngine {
 
         List<String> queryTokens = parseQueryTokens(query);
 
-        // ================== Step 2: 建立 PageNode ==================
         System.out.println("\n[Step 2] 建立頁面節點...");
         List<PageNode> pages = new ArrayList<>();
         for (GoogleConnector.Result r : googleResults) {
             if (r == null || r.title == null || r.link == null) continue;
             
-            // 建立節點
-            PageNode page = createPageNode(r, query, queryTokens, userCity, today);
+            PageNode page = createPageNode(r, query, queryTokens, effectiveCity, today);
             
-            // 🚨 這裡做第一層過濾：如果是明顯的海外標題，直接丟掉
             if (page != null) {
                 if (isLikelyForeign(page.getTitle(), "")) {
-                    // System.out.println("  ❌ 濾除海外標題: " + page.getTitle());
                     continue; 
                 }
                 pages.add(page);
@@ -157,35 +166,25 @@ public class SearchEngine {
         }
         System.out.println("[Pages] 建立 " + pages.size() + " 個頁面節點");
 
-        // ================== Step 3: 並行爬取 ==================
         if (ENABLE_CRAWLING && !pages.isEmpty()) {
             long elapsed = System.currentTimeMillis() - startTime;
             long remainingTime = SEARCH_TIMEOUT_MS - elapsed - 1000;
             
-            // 🚨 優化：只爬前 N 筆，避免 timeout，但邏輯不變
             List<PageNode> pagesToCrawl = pages.stream()
                 .limit(MAX_DEEP_CRAWL_COUNT)
                 .collect(Collectors.toList());
 
             if (remainingTime > 2000) {
-                System.out.println("\n[Step 3] 並行爬取前 " + pagesToCrawl.size() + " 筆網頁 (限時 " + remainingTime + " ms)...");
-                // 這裡使用原本的 parallelCrawl，沒改動裡面邏輯
+                System.out.println("\n[Step 3] 並行爬取前 " + pagesToCrawl.size() + " 筆網頁...");
                 parallelCrawl(pagesToCrawl, queryTokens, remainingTime, today);
-            } else {
-                System.out.println("\n[Step 3] 跳過爬取（時間不足）");
             }
         }
 
-        // ================== Step 3.5: 二次海外過濾 (針對內文) ==================
-        // 爬蟲回來後，內容變多了，再檢查一次內文是不是海外文章
         List<PageNode> filteredPages = new ArrayList<>();
         for (PageNode p : pages) {
             String content = (p.getTextContent() != null) ? p.getTextContent() : "";
-            // 如果爬完發現是日本/國外文章，丟掉
             if (isLikelyForeign(p.getTitle(), content)) {
-                // 但如果有提到台灣城市，則保留 (例如: 日本展in台北)
                 if (!hasTaiwanCity(p.getTitle() + " " + content)) {
-                    // System.out.println("  ❌ 濾除海外內文: " + p.getTitle());
                     continue; 
                 }
             }
@@ -193,12 +192,10 @@ public class SearchEngine {
         }
         pages = filteredPages;
 
-        // 3.3 依使用者城市 + 內文過濾（保留你原本的邏輯）
-        if (userCity != null && !userCity.isEmpty()) {
-            pages = filterByUserCityWithContent(pages, userCity);
+        if (effectiveCity != null && !effectiveCity.isEmpty()) {
+            pages = filterByEffectiveCity(pages, effectiveCity);
         }
 
-        // 3.5 依「是否過期」分組
         List<PageNode> validPages = new ArrayList<>();
         List<PageNode> expiredPages = new ArrayList<>();
         for (PageNode p : pages) {
@@ -209,22 +206,25 @@ public class SearchEngine {
                 validPages.add(p);
             }
         }
-        // 如果 validPages 太少，還是把過期的加回來充數，不然結果太難看
         List<PageNode> pagesToRank = validPages.isEmpty() ? pages : validPages;
 
         System.out.printf("[Filter] 未過期: %d, 已過期: %d%n", validPages.size(), expiredPages.size());
 
-        // ================== Step 4: 進階處理 ==================
         System.out.println("\n[Step 4] 進階處理...");
         
         TFIDFCalculator.applyTFIDFScores(pagesToRank, query);
         EventInfoExtractor.applyCompletenessBonus(pagesToRank);
         pagesToRank = Deduplicator.deduplicate(pagesToRank);
 
-        // ================== Step 5: 排名計算 ==================
         System.out.println("\n[Step 5] 計算最終分數...");
-        RankCalculator.rank(pagesToRank, user, query);
-        applyUserCityBoost(pagesToRank, user);
+        
+        UserProfile effectiveUser = new UserProfile();
+        if (effectiveCity != null) {
+            effectiveUser.setUserCity(effectiveCity);
+        }
+        
+        RankCalculator.rank(pagesToRank, effectiveUser, query);
+        applyUserCityBoost(pagesToRank, effectiveUser);
 
         Tree tree = new Tree();
         tree.addPages(pagesToRank);
@@ -235,14 +235,61 @@ public class SearchEngine {
         System.out.println("\n========== 搜尋完成 ==========");
         System.out.println("[Time] " + duration + " ms");
         System.out.println("[Results] " + pagesToRank.size() + " 個網站");
+        System.out.println("[EffectiveCity] " + (effectiveCity != null ? effectiveCity : "全台"));
         printResultsSummary(pagesToRank);
 
         return pagesToRank;
     }
 
-    // =====================================================
-    // 爬蟲相關 (保留原始邏輯)
-    // =====================================================
+    private static List<PageNode> filterByEffectiveCity(List<PageNode> pages, String effectiveCity) {
+        if (pages == null || pages.isEmpty()) return pages;
+
+        String normalizedTarget = normalizeCity(effectiveCity);
+        if (normalizedTarget == null || normalizedTarget.isEmpty()) return pages;
+
+        String targetLower = normalizedTarget.toLowerCase();
+        
+        List<PageNode> kept = new ArrayList<>();
+        List<PageNode> allTaiwan = new ArrayList<>();
+
+        for (PageNode p : pages) {
+            String city = normalizeCity(p.getCity());
+            String title = (p.getTitle() != null) ? p.getTitle() : "";
+            String text = (p.getTextContent() != null) ? p.getTextContent() : "";
+            String combinedLower = (title + " " + text).toLowerCase();
+
+            boolean isAllTaiwan = (city == null || city.isEmpty() || "全台".equals(city));
+            boolean matchByCityField = city != null && !city.isEmpty() && city.equals(normalizedTarget);
+            boolean matchByText = combinedLower.contains(targetLower);
+
+            if (!matchByText && "台北".equals(normalizedTarget)) {
+                if (combinedLower.contains("大台北") || combinedLower.contains("雙北") || 
+                    combinedLower.contains("北北基") || combinedLower.contains("新北")) {
+                    matchByText = true;
+                }
+            }
+
+            if (isLikelyForeign(title, text) && !hasTaiwanCity(title + " " + text)) {
+                continue;
+            }
+
+            if (matchByCityField || matchByText) {
+                kept.add(p);
+            } else if (isAllTaiwan) {
+                allTaiwan.add(p);
+            }
+        }
+
+        if (!kept.isEmpty()) {
+            int allTaiwanLimit = Math.min(allTaiwan.size(), 5);
+            kept.addAll(allTaiwan.subList(0, allTaiwanLimit));
+            System.out.println("[CityFilter] 依城市 '" + effectiveCity + "' 過濾後剩 " + kept.size() + " 筆");
+            return kept;
+        } else {
+            System.out.println("[CityFilter] 無明確匹配 '" + effectiveCity + "'，回退使用原始結果");
+            return pages;
+        }
+    }
 
     private static void parallelCrawl(List<PageNode> pages, List<String> queryTokens,
                                       long timeoutMs, LocalDate today) {
@@ -263,9 +310,9 @@ public class SearchEngine {
             CompletableFuture<Void> allOf =
                     CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
             allOf.get(timeoutMs, TimeUnit.MILLISECONDS);
-            System.out.println("[Crawl] 全部完成 (或部分完成)");
+            System.out.println("[Crawl] 全部完成");
         } catch (TimeoutException e) {
-            System.out.println("[Crawl] 時間到，停止等待，已完成的照樣用");
+            System.out.println("[Crawl] 時間到，已完成的照樣用");
         } catch (Exception e) {
             System.out.println("[Crawl] 錯誤: " + e.getMessage());
         }
@@ -284,18 +331,15 @@ public class SearchEngine {
             String crawledTitle = result.getTitle();
             String content = result.getTextContent();
 
-            // (1) 若爬到更完整的標題就替換
             if (crawledTitle != null && !crawledTitle.isEmpty()
                     && crawledTitle.length() > (page.getTitle() != null ? page.getTitle().length() : 0)) {
                 page.setTitle(crawledTitle);
             }
 
-            // (2) 內文塞回 PageNode
             if (content != null) {
                 page.setTextContent(content);
             }
 
-            // (3) 用「標題 + 內文」再試一次抓日期
             if (page.getEventDate() == null) {
                 String combined = (crawledTitle != null ? crawledTitle + " " : "") +
                                   (content != null ? content : "");
@@ -305,7 +349,6 @@ public class SearchEngine {
                 }
             }
 
-            // (4) 用內容再試一次抓城市
             if (content != null) {
                 String originCity = page.getCity();
                 if (originCity == null || originCity.isEmpty() || "全台".equals(originCity)) {
@@ -318,7 +361,6 @@ public class SearchEngine {
                 }
             }
 
-            // (5) 內文關鍵字 match → 額外分數
             if (content != null && !content.isEmpty()) {
                 int matchCount = 0;
                 String contentLower = content.toLowerCase();
@@ -330,18 +372,12 @@ public class SearchEngine {
                 page.addScore(matchCount * 5);
             }
 
-            // (6) 建立子頁節點 (保留原始邏輯)
             List<String> links = result.getLinks();
             if (links != null) {
                 int subCount = Math.min(links.size(), 10);
                 for (int i = 0; i < subCount; i++) {
                     String link = links.get(i);
-                    SubPageNode sub = new SubPageNode(
-                            link,
-                            extractTitleFromUrl(link),
-                            "",
-                            page.getUrl()
-                    );
+                    SubPageNode sub = new SubPageNode(link, extractTitleFromUrl(link), "", page.getUrl());
                     page.addSubPage(sub);
                 }
             }
@@ -365,10 +401,6 @@ public class SearchEngine {
         return "";
     }
 
-    // =====================================================
-    // 查詢 / PageNode 建立
-    // =====================================================
-
     private static String expandQuery(String q) {
         StringBuilder result = new StringBuilder(q);
         String lower = q.toLowerCase();
@@ -385,7 +417,7 @@ public class SearchEngine {
     }
 
     private static PageNode createPageNode(GoogleConnector.Result r, String query,
-                                           List<String> queryTokens, String userCity,
+                                           List<String> queryTokens, String effectiveCity,
                                            LocalDate today) {
         if (shouldExclude(r.title, r.link)) return null;
 
@@ -460,7 +492,6 @@ public class SearchEngine {
             sb.append(" 台灣");
         }
 
-        // 🚨 這裡保留原有的排除，並加上海外排除 (v5.3 強化)
         sb.append(" -申請 -申請辦法 -徵選 -補助 -招標 -採購 -招生 -簡章 -課程簡章 -履歷");
         sb.append(" -日本 -東京 -大阪 -首爾 -韓國 -機票 -自由行 -簽證 -入境 -代購");
         sb.append(" -紐西蘭 -新西蘭 -奧克蘭 -澳洲 -雪梨 -墨爾本 -香港 -曼谷 -新加坡");
@@ -476,7 +507,7 @@ public class SearchEngine {
             String t = raw.trim();
             if (t.isEmpty()) continue;
             if ("OR".equalsIgnoreCase(t) || "AND".equalsIgnoreCase(t)) continue;
-            if (t.startsWith("-")) continue; // 忽略排除詞
+            if (t.startsWith("-")) continue;
             tokens.add(t);
         }
         
@@ -490,83 +521,50 @@ public class SearchEngine {
         return expanded;
     }
 
-    // =====================================================
-    // 工具函式：城市過濾 / 排除網址 / 日期解析
-    // =====================================================
-
-    // 🚨 v5.3 強化版：海外內容判斷邏輯
     private static boolean isLikelyForeign(String title, String content) {
         String text = (title + " " + content).toLowerCase();
         
-        // 計算海外關鍵字出現次數
         int foreignCount = 0;
-        String matchedForeign = "";
         for (String key : FOREIGN_KEYWORDS) {
-            String keyLower = key.toLowerCase();
-            if (text.contains(keyLower)) {
+            if (text.contains(key.toLowerCase())) {
                 foreignCount++;
-                if (matchedForeign.isEmpty()) matchedForeign = key;
+                if (foreignCount >= 2) break;
             }
         }
         
         if (foreignCount == 0) return false;
         
-        // 計算台灣關鍵字出現次數
         int taiwanCount = 0;
         if (text.contains("台灣") || text.contains("臺灣") || text.contains("taiwan")) {
-            taiwanCount += 2; // 明確提台灣，加權
+            taiwanCount += 2;
         }
         for (String alias : CITY_ALIASES.keySet()) {
             if (text.contains(alias.toLowerCase())) {
                 taiwanCount++;
             }
         }
-        // 額外的台灣地標關鍵字
-        String[] taiwanLandmarks = {"華山", "松菸", "駁二", "高流", "北流", "小巨蛋", "大巨蛋", 
-            "信義區", "西門町", "忠孝", "中山", "士林", "淡水", "九份", "平溪", "陽明山"};
-        for (String landmark : taiwanLandmarks) {
+        for (String landmark : TAIWAN_LANDMARKS) {
             if (text.contains(landmark.toLowerCase())) {
                 taiwanCount++;
             }
         }
         
-        // 🔑 判斷邏輯：
-        // - 如果海外關鍵字 >= 2 且 台灣關鍵字 < 2，幾乎確定是海外
-        // - 如果海外關鍵字 = 1 且 台灣關鍵字 = 0，很可能是海外
-        // - 如果標題就含海外地名，且標題無台灣地名，直接判定海外
-        
         String titleLower = title.toLowerCase();
-        boolean titleHasForeign = false;
-        for (String key : FOREIGN_KEYWORDS) {
-            if (titleLower.contains(key.toLowerCase())) {
-                titleHasForeign = true;
-                break;
-            }
-        }
+        boolean titleHasForeign = FOREIGN_KEYWORDS.stream()
+                .anyMatch(k -> titleLower.contains(k.toLowerCase()));
         
-        boolean titleHasTaiwan = false;
-        if (titleLower.contains("台灣") || titleLower.contains("臺灣") || titleLower.contains("taiwan")) {
-            titleHasTaiwan = true;
-        } else {
-            for (String alias : CITY_ALIASES.keySet()) {
-                if (titleLower.contains(alias.toLowerCase())) {
-                    titleHasTaiwan = true;
-                    break;
-                }
-            }
-        }
+        boolean titleHasTaiwan = titleLower.contains("台灣") || titleLower.contains("臺灣") || 
+                titleLower.contains("taiwan") ||
+                CITY_ALIASES.keySet().stream().anyMatch(a -> titleLower.contains(a.toLowerCase()));
         
-        // 標題有海外地名但無台灣 → 判定為海外
         if (titleHasForeign && !titleHasTaiwan) {
             return true;
         }
         
-        // 海外關鍵字多於台灣關鍵字很多 → 判定為海外
         if (foreignCount >= 2 && taiwanCount < 2) {
             return true;
         }
         
-        // 只有海外沒有台灣 → 判定為海外
         if (foreignCount >= 1 && taiwanCount == 0) {
             return true;
         }
@@ -574,103 +572,79 @@ public class SearchEngine {
         return false;
     }
 
-    // v5.3 強化：台灣城市/地標判斷
     private static boolean hasTaiwanCity(String text) {
         String lower = text.toLowerCase();
-        // 明確的台灣關鍵字
         if (lower.contains("台灣") || lower.contains("臺灣") || lower.contains("taiwan")) return true;
         
-        // 台灣城市
         for (String alias : CITY_ALIASES.keySet()) {
             if (lower.contains(alias.toLowerCase())) return true;
         }
         
-        // 台灣知名地標/場館
-        String[] taiwanLandmarks = {
-            "華山", "松菸", "駁二", "高流", "北流", "小巨蛋", "大巨蛋", "兩廳院", "國家音樂廳",
-            "故宮", "北美館", "當代藝術館", "科博館", "海生館", "衛武營", "信義區", "西門町",
-            "忠孝", "中山", "士林", "淡水", "九份", "平溪", "陽明山", "墾丁", "日月潭",
-            "阿里山", "太魯閣", "清境", "台東", "花蓮", "宜蘭", "澎湖", "金門", "馬祖",
-            "草悟道", "勤美", "逢甲", "一中街", "東海", "中友", "新光三越", "sogo", "遠百"
-        };
-        for (String landmark : taiwanLandmarks) {
+        for (String landmark : TAIWAN_LANDMARKS) {
             if (lower.contains(landmark.toLowerCase())) return true;
         }
         
         return false;
     }
 
-    private static List<PageNode> filterByUserCityWithContent(List<PageNode> pages, String userCity) {
-        // 保留你原本完整的邏輯
-        if (pages == null || pages.isEmpty()) return pages;
-
-        String normalizedTarget = normalizeCity(userCity);
-        if (normalizedTarget == null || normalizedTarget.isEmpty()) return pages;
-
-        String targetLower = normalizedTarget.toLowerCase();
-        List<String> taiwanCityTerms = new ArrayList<>();
-        for (String alias : CITY_ALIASES.keySet()) {
-            taiwanCityTerms.add(alias.toLowerCase());
+    private static String detectCityFromQuery(String query) {
+        if (query == null) return null;
+        String lower = query.toLowerCase();
+        for (Map.Entry<String, String> e : CITY_ALIASES.entrySet()) {
+            if (lower.contains(e.getKey().toLowerCase())) {
+                return e.getValue();
+            }
         }
-        taiwanCityTerms.add("台灣");
-        taiwanCityTerms.add("臺灣");
+        return null;
+    }
 
-        List<PageNode> kept = new ArrayList<>();
+    private static String normalizeCity(String city) {
+        if (city == null) return null;
+        String trimmed = city.trim();
+        if (trimmed.isEmpty()) return trimmed;
+        String lower = trimmed.toLowerCase();
+        for (Map.Entry<String, String> e : CITY_ALIASES.entrySet()) {
+            if (lower.contains(e.getKey().toLowerCase())) {
+                return e.getValue();
+            }
+        }
+        return trimmed;
+    }
+
+    private static void applyUserCityBoost(List<PageNode> pages, UserProfile user) {
+        if (pages == null || pages.isEmpty() || user == null) return;
+
+        String userCity = normalizeCity(user.getUserCity());
+        if (userCity == null || userCity.isEmpty()) return;
+
+        double max = Double.NEGATIVE_INFINITY;
+        double min = Double.POSITIVE_INFINITY;
+
+        Map<PageNode, Double> newScores = new HashMap<>();
+        for (PageNode p : pages) {
+            double score = p.getTotalScore();
+            String pageCity = normalizeCity(p.getCity());
+
+            if (pageCity != null && !pageCity.isEmpty() && !"全台".equals(pageCity)) {
+                if (pageCity.equals(userCity)) {
+                    score *= 1.15;
+                } else {
+                    score *= 0.85;
+                }
+            }
+            newScores.put(p, score);
+            max = Math.max(max, score);
+            min = Math.min(min, score);
+        }
+
+        if (!Double.isFinite(max) || !Double.isFinite(min)) return;
+        double range = max - min;
+        if (range < 1e-6) range = 1.0;
 
         for (PageNode p : pages) {
-            String city  = normalizeCity(p.getCity());
-            String title = (p.getTitle() != null) ? p.getTitle() : "";
-            String text  = (p.getTextContent() != null) ? p.getTextContent() : "";
-            String combinedLower = (title + " " + text).toLowerCase();
-
-            boolean isAllTaiwan = (city == null || city.isEmpty() || "全台".equals(city));
-            boolean matchByCityField = city != null && !city.isEmpty() && city.equals(normalizedTarget);
-            boolean matchByText = combinedLower.contains(targetLower);
-
-            if (!matchByText && "台北".equals(normalizedTarget)) {
-                if (combinedLower.contains("大台北") || combinedLower.contains("雙北") || combinedLower.contains("北北基")) {
-                    matchByText = true;
-                }
-            }
-
-            boolean hasTaiwanCityInText = false;
-            for (String term : taiwanCityTerms) {
-                if (combinedLower.contains(term)) {
-                    hasTaiwanCityInText = true;
-                    break;
-                }
-            }
-
-            // 這裡已經有 isLikelyForeign 擋在前面了，但原本邏輯保留也無妨
-            boolean hasForeignKeyword = false;
-            for (String fk : FOREIGN_KEYWORDS) {
-                if (combinedLower.contains(fk.toLowerCase())) {
-                    hasForeignKeyword = true;
-                    break;
-                }
-            }
-            if (!hasTaiwanCityInText && hasForeignKeyword) {
-                continue;
-            }
-
-            if (!isAllTaiwan && !normalizedTarget.equals(city) && !matchByText && !matchByCityField) {
-                continue;
-            }
-            if (isAllTaiwan) {
-                if (matchByText) kept.add(p);
-                continue;
-            }
-            if (matchByCityField || matchByText) {
-                kept.add(p);
-            }
-        }
-
-        if (!kept.isEmpty()) {
-            System.out.println("[CityFilter] 依城市過濾後剩 " + kept.size() + " 筆");
-            return kept;
-        } else {
-            System.out.println("[CityFilter] 全部被濾掉，回退使用原始結果");
-            return pages;
+            double score = newScores.get(p);
+            double normalized = ((score - min) / range) * 90 + 10;
+            p.setTotalScore(Math.round(normalized * 10) / 10.0);
         }
     }
 
@@ -707,7 +681,6 @@ public class SearchEngine {
         return parseDate(content, today);
     }
 
-    // 🚨 優化後的日期解析邏輯
     private static LocalDate parseDate(String text, LocalDate today) {
         if (text == null) return null;
 
@@ -715,7 +688,9 @@ public class SearchEngine {
         Matcher m1 = p1.matcher(text);
         if (m1.find()) {
             try {
-                return LocalDate.of(Integer.parseInt(m1.group(1)), Integer.parseInt(m1.group(2)), Integer.parseInt(m1.group(3)));
+                return LocalDate.of(Integer.parseInt(m1.group(1)), 
+                                   Integer.parseInt(m1.group(2)), 
+                                   Integer.parseInt(m1.group(3)));
             } catch (Exception ignored) {}
         }
 
@@ -723,7 +698,9 @@ public class SearchEngine {
         Matcher mRoc = pRoc.matcher(text);
         if (mRoc.find()) {
             try {
-                return LocalDate.of(Integer.parseInt(mRoc.group(1)) + 1911, Integer.parseInt(mRoc.group(2)), Integer.parseInt(mRoc.group(3)));
+                return LocalDate.of(Integer.parseInt(mRoc.group(1)) + 1911, 
+                                   Integer.parseInt(mRoc.group(2)), 
+                                   Integer.parseInt(mRoc.group(3)));
             } catch (Exception ignored) {}
         }
 
@@ -735,16 +712,16 @@ public class SearchEngine {
                 int day = Integer.parseInt(m2.group(2));
                 int currentYear = today.getYear();
                 
-                // 邏輯：如果現在是 10-12 月，但抓到的月份是 1-3 月，推測是明年
-                if (today.getMonthValue() >= 10 && month <= 3) {
+                if (today.getMonthValue() >= 10 && month <= 4) {
                     return LocalDate.of(currentYear + 1, month, day);
                 }
                 
-                // 邏輯：如果日期明顯已經過了很久 (超過60天)，才去考慮是否為明年，否則保留當年
                 LocalDate date = LocalDate.of(currentYear, month, day);
-                if (date.isBefore(today.minusDays(60))) {
-                     // 這裡保守一點，如果是久遠以前的日期，交給 ranking 去扣分，不要隨便加一年
-                     // 除非是特定的「明年」關鍵字，但這裡 regex 沒抓到
+                if (date.isBefore(today.minusDays(30))) {
+                    LocalDate nextYearDate = LocalDate.of(currentYear + 1, month, day);
+                    if (nextYearDate.isBefore(today.plusMonths(14))) {
+                        return nextYearDate;
+                    }
                 }
                 return date;
             } catch (Exception ignored) {}
@@ -757,7 +734,7 @@ public class SearchEngine {
                 int month = Integer.parseInt(m3.group(1));
                 int day = Integer.parseInt(m3.group(2));
                 int currentYear = today.getYear();
-                if (today.getMonthValue() >= 10 && month <= 3) {
+                if (today.getMonthValue() >= 10 && month <= 4) {
                     return LocalDate.of(currentYear + 1, month, day);
                 }
                 return LocalDate.of(currentYear, month, day);
@@ -770,67 +747,6 @@ public class SearchEngine {
         }
 
         return null;
-    }
-
-    private static String detectCityFromQuery(String query) {
-        if (query == null) return "";
-        String lower = query.toLowerCase();
-        for (Map.Entry<String, String> e : CITY_ALIASES.entrySet()) {
-            if (lower.contains(e.getKey().toLowerCase())) {
-                return e.getValue();
-            }
-        }
-        return "";
-    }
-
-    private static String normalizeCity(String city) {
-        if (city == null) return null;
-        String trimmed = city.trim();
-        if (trimmed.isEmpty()) return trimmed;
-        String lower = trimmed.toLowerCase();
-        for (Map.Entry<String, String> e : CITY_ALIASES.entrySet()) {
-            if (lower.contains(e.getKey().toLowerCase())) {
-                return e.getValue();
-            }
-        }
-        return trimmed;
-    }
-
-    private static void applyUserCityBoost(List<PageNode> pages, UserProfile user) {
-        if (pages == null || pages.isEmpty() || user == null) return;
-
-        String userCity = normalizeCity(user.getUserCity());
-        if (userCity == null || userCity.isEmpty()) return;
-
-        double max = Double.NEGATIVE_INFINITY;
-        double min = Double.POSITIVE_INFINITY;
-
-        Map<PageNode, Double> newScores = new HashMap<>();
-        for (PageNode p : pages) {
-            double score = p.getTotalScore();
-            String pageCity = normalizeCity(p.getCity());
-
-            if (pageCity != null && !pageCity.isEmpty()) {
-                if (pageCity.equals(userCity)) {
-                    score *= 1.2; 
-                } else {
-                    score *= 0.8; 
-                }
-            }
-            newScores.put(p, score);
-            max = Math.max(max, score);
-            min = Math.min(min, score);
-        }
-
-        if (!Double.isFinite(max) || !Double.isFinite(min)) return;
-        double range = max - min;
-        if (range < 1e-6) range = 1.0;
-
-        for (PageNode p : pages) {
-            double score = newScores.get(p);
-            double normalized = ((score - min) / range) * 90 + 10;
-            p.setTotalScore(Math.round(normalized * 10) / 10.0);
-        }
     }
 
     private static String extractDomain(String url) {
@@ -853,14 +769,19 @@ public class SearchEngine {
 
     private static void printResultsSummary(List<PageNode> pages) {
         System.out.println("\n📊 搜尋結果摘要（共 " + pages.size() + " 筆）：");
-        System.out.println("─".repeat(60));
+        System.out.println("─".repeat(70));
         int rank = 1;
         for (PageNode p : pages) {
             String dateStr = (p.getEventDate() != null) ? p.getEventDate().toString() : "無日期";
-            System.out.printf("#%d [%.1f] %s | %s%n",
-                    rank++, p.getTotalScore(), dateStr, truncate(p.getTitle(), 35));
+            String cityStr = (p.getCity() != null) ? p.getCity() : "全台";
+            System.out.printf("#%d [%.1f] %s | %s | %s%n",
+                    rank++, p.getTotalScore(), dateStr, cityStr, truncate(p.getTitle(), 30));
+            if (rank > 15) {
+                System.out.println("... 以及更多 " + (pages.size() - 15) + " 筆結果");
+                break;
+            }
         }
-        System.out.println("─".repeat(60));
+        System.out.println("─".repeat(70));
     }
 
     public static Tree getLastSearchTree() {
