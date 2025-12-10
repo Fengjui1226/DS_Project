@@ -8,9 +8,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * EventInfoExtractor v1.0 - 結構化活動資訊提取
- * 
- * 功能：
+ * EventInfoExtractor v1.1 - 結構化活動資訊提取 (分類增強版)
+ * * 功能：
  * 1. 提取活動日期（開始/結束）
  * 2. 提取活動時間
  * 3. 提取地點/場館
@@ -88,6 +87,7 @@ public class EventInfoExtractor {
         Map.entry("台中巨蛋", "台中"),
         Map.entry("科博館", "台中"), Map.entry("國立自然科學博物館", "台中"),
         Map.entry("草悟道", "台中"), Map.entry("勤美術館", "台中"),
+        Map.entry("審計新村", "台中"),
         
         // 高雄
         Map.entry("駁二藝術特區", "高雄"), Map.entry("駁二", "高雄"),
@@ -155,18 +155,19 @@ public class EventInfoExtractor {
         Pattern.compile("協辦[：:]\\s*(.{2,30})")
     );
 
-    // 活動類型關鍵字
+    // ★ 優化 3：擴充活動類型關鍵字
     private static final Map<String, String> EVENT_TYPE_KEYWORDS = Map.ofEntries(
-        Map.entry("演唱會", "演唱會"), Map.entry("concert", "演唱會"),
-        Map.entry("音樂會", "音樂會"), Map.entry("音樂節", "音樂節"),
-        Map.entry("展覽", "展覽"), Map.entry("特展", "展覽"), Map.entry("exhibition", "展覽"),
-        Map.entry("市集", "市集"), Map.entry("market", "市集"),
-        Map.entry("講座", "講座"), Map.entry("工作坊", "工作坊"), Map.entry("workshop", "工作坊"),
+        Map.entry("演唱會", "演唱會"), Map.entry("concert", "演唱會"), Map.entry("專場", "演唱會"),
+        Map.entry("音樂會", "音樂會"), Map.entry("音樂節", "音樂節"), Map.entry("祭", "音樂節"),
+        Map.entry("展覽", "展覽"), Map.entry("特展", "展覽"), Map.entry("exhibition", "展覽"), Map.entry("個展", "展覽"),
+        Map.entry("市集", "市集"), Map.entry("market", "市集"), Map.entry("快閃", "市集"),
+        Map.entry("講座", "講座"), Map.entry("工作坊", "工作坊"), Map.entry("workshop", "工作坊"), Map.entry("分享會", "講座"),
         Map.entry("路跑", "路跑"), Map.entry("馬拉松", "路跑"),
         Map.entry("派對", "派對"), Map.entry("party", "派對"),
-        Map.entry("舞台劇", "戲劇"), Map.entry("話劇", "戲劇"), Map.entry("音樂劇", "戲劇"),
+        Map.entry("舞台劇", "戲劇"), Map.entry("話劇", "戲劇"), Map.entry("音樂劇", "戲劇"), Map.entry("劇團", "戲劇"),
         Map.entry("電影", "電影"), Map.entry("影展", "電影"),
-        Map.entry("親子", "親子活動")
+        Map.entry("親子", "親子活動"), Map.entry("兒童", "親子活動"), Map.entry("體驗", "親子活動"),
+        Map.entry("露營", "戶外"), Map.entry("野餐", "戶外"), Map.entry("健行", "戶外")
     );
 
     // ================= 主要 API =================
