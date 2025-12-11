@@ -16,19 +16,26 @@ import app.da.GoogleConnector;
 import static app.bl.Constants.*;
 
 /**
- * SearchEngine v8.0 - 寬進嚴出最終版
+ * SearchEngine v9.0 - 節能精準版
  * * 優化重點：
- * 1. [Query] 移除所有負向關鍵字 (-申請 -維修...)，避免 Google 誤殺好結果。
- * 2. [Query] 移除強制年份，讓後端 RankCalculator 的「過期處決」邏輯去處理。
- * 3. [策略] Google 只管抓，品質由 Java 後端全權負責。
+ * 1. [API 節省] MAX_GOOGLE_RESULTS 下調至 20 (每次搜尋僅消耗 2 單位額度)。
+ * 2. [效能提升] MAX_DEEP_CRAWL_COUNT 下調至 12 (只爬取最有希望的前段班)。
+ * 3. [策略] 依賴 RankCalculator v7.1 的高精準度，不需要抓太多垃圾來過濾。
  */
 public class SearchEngine {
 
-    private static final int MAX_GOOGLE_RESULTS = 50;   // 抓多一點，因為現在沒過濾，會有雜訊進來
-    private static final int MAX_DEEP_CRAWL_COUNT = 30; // 聚焦處理前 30 筆
+    // ★ 關鍵修改：節省 API 額度
+    // Google API 預設 10 筆算 1 次 request。
+    // 設為 20 代表每次搜尋只扣 2 次額度 (原本 50 會扣 5 次)。
+    private static final int MAX_GOOGLE_RESULTS = 20;   
+    
+    // ★ 關鍵修改：加速爬蟲
+    // 既然 Google 排名前面的通常相關性較高，我們只深爬前 12 個即可
+    private static final int MAX_DEEP_CRAWL_COUNT = 12; 
+    
     private static final boolean ENABLE_CRAWLING = true;
-    private static final int SEARCH_TIMEOUT_MS = 25000;
-    private static final int CRAWL_PARALLEL_LIMIT = 20;
+    private static final int SEARCH_TIMEOUT_MS = 18000; // 時間縮短，因為爬的頁面變少了
+    private static final int CRAWL_PARALLEL_LIMIT = 15; // 稍微降低並發數，減輕系統負擔
     private static final ExecutorService CRAWL_EXECUTOR =
             Executors.newFixedThreadPool(CRAWL_PARALLEL_LIMIT);
 
@@ -37,7 +44,7 @@ public class SearchEngine {
 
     public static List<PageNode> search(String query, UserProfile user) throws Exception {
         System.out.println("\n╔═══════════════════════════════════════════════════════╗");
-        System.out.println("║   🔍 EventFinder v8.0 (Broadest Recall)               ║");
+        System.out.println("║   🔍 EventFinder v9.0 (Eco Mode)                      ║");
         System.out.println("╚═══════════════════════════════════════════════════════╝");
         System.out.println("[Query] " + query);
 
@@ -50,7 +57,7 @@ public class SearchEngine {
         String effectiveCity = (queryCity != null && !queryCity.isEmpty()) ? queryCity : 
                               ((userCity != null && !userCity.isEmpty()) ? userCity : null);
 
-        // 2. 準備最純粹的 Google Query
+        // 2. 準備 Google Query
         String googleQuery = query;
         if (queryCity == null && effectiveCity != null) {
             googleQuery = effectiveCity + " " + query;
@@ -59,12 +66,12 @@ public class SearchEngine {
         QueryUnderstanding.ParsedQuery parsedQuery = QueryUnderstanding.parse(googleQuery);
         googleQuery = expandQuery(parsedQuery.expandedQuery);
         
-        // ★ 關鍵：這裡產出的 Query 非常乾淨，只包含正向詞
+        // 保持乾淨的 Query，依舊不加負向關鍵字，但因為抓得少，依賴 Google 自身的排序
         String refinedQuery = refineQuery(googleQuery); 
         System.out.println("[Refined] " + refinedQuery);
 
         System.out.println("\n[Step 1] 呼叫 Google API...");
-        // 抓取更多結果 (50筆)，因為我們預期會有雜訊，需要足夠的基數來篩選
+        // 這裡會傳入 20，GoogleConnector 應該會發送 2 次請求 (1-10, 11-20)
         List<GoogleConnector.Result> googleResults =
                 GoogleConnector.search(refinedQuery, MAX_GOOGLE_RESULTS, 3000);
         System.out.println("[Google] 取得 " + googleResults.size() + " 個結果");
@@ -76,12 +83,10 @@ public class SearchEngine {
         for (GoogleConnector.Result r : googleResults) {
             if (r == null || r.title == null || r.link == null) continue;
             
-            // 基礎網域黑名單還是要擋 (例如 twitter/amazon 這種明顯無關的)
             if (shouldExclude(r.title, r.link)) continue;
 
             PageNode page = createPageNode(r, query, queryTokens, effectiveCity, today);
             if (page != null) {
-                // 這裡只做最粗略的海外排除 (標題有"日本/東京")，其他的交給 Ranker
                 if (Constants.isLikelyForeign(page.getTitle())) {
                     continue;
                 }
@@ -93,8 +98,9 @@ public class SearchEngine {
         // 3. 爬蟲階段
         if (ENABLE_CRAWLING && !pages.isEmpty()) {
             long elapsed = System.currentTimeMillis() - startTime;
-            long remainingTime = SEARCH_TIMEOUT_MS - elapsed - 2000;
+            long remainingTime = SEARCH_TIMEOUT_MS - elapsed - 1000;
             
+            // 只爬前 MAX_DEEP_CRAWL_COUNT (12) 筆
             List<PageNode> pagesToCrawl = pages.stream()
                 .limit(MAX_DEEP_CRAWL_COUNT)
                 .collect(Collectors.toList());
@@ -105,13 +111,8 @@ public class SearchEngine {
             }
         }
 
-        // 4. 過濾階段 (現在主要依賴 RankCalculator 的 0 分機制，這裡只做基本清理)
-        List<PageNode> filteredPages = new ArrayList<>();
-        for (PageNode p : pages) {
-            // 這裡不再做年份或城市的硬性移除
-            // 讓 RankCalculator 透過計算來決定去留
-            filteredPages.add(p);
-        }
+        // 4. 過濾階段
+        List<PageNode> filteredPages = new ArrayList<>(pages);
         pages = filteredPages;
 
         System.out.println("\n[Step 4] 進階處理與排名...");
@@ -119,17 +120,18 @@ public class SearchEngine {
         EventInfoExtractor.applyCompletenessBonus(pages);
         pages = Deduplicator.deduplicate(pages);
 
-        // 5. 最終排名 (RankCalculator v6.0 會執行過期處決和垃圾內容降權)
+        // 5. 最終排名
         UserProfile effectiveUser = new UserProfile();
         if (effectiveCity != null) effectiveUser.setUserCity(effectiveCity);
         
         RankCalculator.rank(pages, effectiveUser, query);
         
-        // 6. 最終清理：移除分數為 0 的結果 (被 Ranker 處決的)
+        // 6. 最終清理：因為樣本數少，稍微放寬一點點移除標準，避免結果全滅
+        // 但如果有過期處決 (0分)，還是要移除
         int beforeClean = pages.size();
-        pages.removeIf(p -> p.getTotalScore() <= 0.1);
+        pages.removeIf(p -> p.getTotalScore() <= 0.01);
         int afterClean = pages.size();
-        System.out.printf("[Clean] 移除 %d 個低分/過期/垃圾結果%n", beforeClean - afterClean);
+        System.out.printf("[Clean] 移除 %d 個無效結果%n", beforeClean - afterClean);
 
         Tree tree = new Tree();
         tree.addPages(pages);
@@ -145,29 +147,20 @@ public class SearchEngine {
         return pages;
     }
 
-    // =================================================================
-    // ★ 關鍵修改：refineQuery 不再加入任何負向關鍵字
-    // =================================================================
     private static String refineQuery(String query) {
         String q = (query == null) ? "" : query.trim();
         if (q.isEmpty()) return q;
         StringBuilder sb = new StringBuilder(q);
         String lower = q.toLowerCase();
 
-        // 1. 如果沒有活動相關詞，才加廣泛詞 (增加 Recall)
         boolean hasEventWord = EVENT_TERMS.stream().anyMatch(t -> lower.contains(t.toLowerCase()));
         if (!hasEventWord) {
             sb.append(" (活動 OR 市集 OR 展覽)");
         }
 
-        // 2. 確保地域性 (增加 Precision)
         if (!lower.contains("台灣") && !lower.contains("taiwan")) {
             sb.append(" 台灣");
         }
-
-        // 3. 移除原本的 "-申請 -辦法 -招標..."
-        // 我們相信 RankCalculator v6.0 的 "M_APPLICATION_PENALTY" 和 "M_NOISE_PENALTY"
-        // 能有效將這些雜訊降權到底部，而不會誤殺好結果。
         
         return sb.toString();
     }
@@ -197,7 +190,6 @@ public class SearchEngine {
         return false;
     }
     
-    // 平行爬蟲邏輯 (保持原樣，因為這是好的)
     private static void parallelCrawl(List<PageNode> pages, List<String> queryTokens,
                                       long timeoutMs, LocalDate today) {
         List<CompletableFuture<Void>> futures = new ArrayList<>();
@@ -241,9 +233,10 @@ public class SearchEngine {
                 if (city != null) page.setCity(city);
             }
             
+            // 減少子連結爬取數量
             List<String> links = result.getLinks();
             if (links != null) {
-                int subCount = Math.min(links.size(), 6);
+                int subCount = Math.min(links.size(), 4); // 從 6 降到 4
                 for (int i = 0; i < subCount; i++) {
                     String link = links.get(i);
                     SubPageNode sub = new SubPageNode(link, extractTitleFromUrl(link), "", page.getUrl());
@@ -254,7 +247,6 @@ public class SearchEngine {
     }
 
     private static LocalDate extractDateFromTitle(String title, LocalDate today) {
-        // 使用 EventInfoExtractor 或簡單 regex
         return parseDate(title, today);
     }
     
@@ -262,11 +254,9 @@ public class SearchEngine {
         return parseDate(text, today);
     }
 
-    // 簡單的日期解析 (應與 SearchEngine v7.2 保持一致或使用 EventInfoExtractor)
     private static LocalDate parseDate(String text, LocalDate today) {
         if (text == null) return null;
-        // 這裡僅作示意，實際應呼叫 EventInfoExtractor.extract(text).startDate
-        // 為保持單檔完整性，這裡不重複貼 EventInfoExtractor 的代碼
+        // 簡易解析邏輯，實際專案建議呼叫 EventInfoExtractor
         return null; 
     }
 

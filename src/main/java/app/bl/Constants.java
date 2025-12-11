@@ -5,14 +5,16 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Constants v2.2 - 完整版 (修復編譯錯誤)
+ * Constants v4.1 - 關鍵字庫終極擴充版
+ * * 擴充：台灣地標 (TAIWAN_LANDMARKS) - 覆蓋北中南各大熱門活動區
+ * * 擴充：類別擴展 (CATEGORY_EXPANSIONS) - 增加更多活動細分類
+ * * 保持：針對 IG、學術論文的優化策略
  */
 public final class Constants {
 
-    private Constants() {} // 防止實例化
+    private Constants() {} 
 
-    // ==================== 城市相關 ====================
-    
+    // ==================== 城市相關 (保持不變) ====================
     public static final Map<String, String> CITY_ALIASES = Map.ofEntries(
         Map.entry("台北", "台北"), Map.entry("臺北", "台北"), Map.entry("taipei", "台北"), Map.entry("台北市", "台北"),
         Map.entry("新北", "新北"), Map.entry("新北市", "新北"), Map.entry("板橋", "新北"),
@@ -34,8 +36,7 @@ public final class Constants {
         "澎湖", "金門", "馬祖"
     );
 
-    // ==================== 場館相關 ====================
-    
+    // ==================== 場館相關 (保持不變) ====================
     public static final Map<String, String> VENUE_CITY = Map.ofEntries(
         Map.entry("華山1914", "台北"), Map.entry("松山文創", "台北"), Map.entry("松菸", "台北"),
         Map.entry("台北小巨蛋", "台北"), Map.entry("台北大巨蛋", "台北"), Map.entry("南港展覽館", "台北"),
@@ -47,19 +48,86 @@ public final class Constants {
         Map.entry("蘭陽博物館", "宜蘭"), Map.entry("傳藝中心", "宜蘭")
     );
     
+    // ★ 擴充：台灣熱門活動地標 (用於判斷是否為台灣活動)
     public static final Set<String> TAIWAN_LANDMARKS = Set.of(
-        "華山", "松菸", "駁二", "衛武營", "小巨蛋", "大巨蛋", "信義區", "西門町", "草悟道", "愛河"
+        // 台北
+        "華山", "松菸", "小巨蛋", "大巨蛋", "信義區", "西門町", "中正紀念堂", "國父紀念館", 
+        "兩廳院", "南港展覽館", "世貿", "北流", "北美館", "當代館", "大稻埕", "迪化街", 
+        "圓山", "花博", "寶藏巖", "美麗華", "三創", "光華", "公館", "師大", "赤峰街",
+        // 新北
+        "耶誕城", "板橋車站", "碧潭", "淡水老街", "漁人碼頭", "九份", "平溪", "十分", 
+        "新月橋", "435藝文特區", "鶯歌", "三峽老街",
+        // 台中
+        "勤美", "草悟道", "審計新村", "歌劇院", "秋紅谷", "科博館", "逢甲", "一中街", 
+        "光復新村", "綠園道", "帝國製糖廠", "高美濕地", "東海大學",
+        // 台南
+        "藍晒圖", "奇美博物館", "南美館", "漁光島", "神農街", "河樂廣場", "安平古堡", 
+        "赤崁樓", "國華街", "正興街", "十鼓",
+        // 高雄
+        "駁二", "衛武營", "高流", "愛河", "西子灣", "棧貳庫", "巨蛋", "蓮池潭", "大東", "旗津",
+        // 其他
+        "鐵花村", "檜意森活村", "傳藝中心", "蘭陽博物館", "羅東林業文化園區", "勝利星村"
     );
 
     // ==================== 關鍵字擴充 ====================
 
+    // ★ 擴充：查詢擴展 (這些詞會被用來擴大搜尋範圍)
+    public static final Map<String, List<String>> CATEGORY_EXPANSIONS = Map.ofEntries(
+        Map.entry("市集", List.of(
+            "文創市集", "手作市集", "假日市集", "聖誕市集", "二手市集", 
+            "小農市集", "餐車市集", "風格市集", "主題市集", "復古市集", 
+            "蚤之市", "花市", "創意市集", "market"
+        )),
+        Map.entry("展覽", List.of(
+            "特展", "回顧展", "快閃店", "體驗展", "藝術展", "設計展", 
+            "攝影展", "插畫展", "動漫展", "博覽會", "畢業展", "個展", 
+            "聯展", "沉浸式展覽", "exhibition"
+        )),
+        Map.entry("音樂", List.of(
+            "音樂節", "音樂祭", "live house", "聽團", "樂團演出", 
+            "獨立音樂", "爵士音樂節", "管弦樂", "售票演唱會", "免費演唱會", 
+            "音樂會", "DJ派對", "music festival"
+        )),
+        Map.entry("演唱會", List.of(
+            "巡迴演唱會", "專場", "見面會", "粉絲見面會", "售票演唱會", "concert"
+        )),
+        Map.entry("親子", List.of(
+            "親子活動", "體驗營", "繪本", "說故事", "兒童劇", "DIY", 
+            "觀光工廠", "科普活動", "共融公園", "親子館", "夏令營", "冬令營"
+        )),
+        Map.entry("戶外", List.of(
+            "露營", "野餐", "登山", "健行", "路跑", "馬拉松", "單車", 
+            "自行車", "SUP", "衝浪", "生態導覽", "賞花", "賞螢"
+        )),
+        Map.entry("藝文", List.of(
+            "講座", "工作坊", "座談會", "分享會", "讀書會", "電影放映", 
+            "影展", "舞台劇", "舞蹈", "戲劇", "表演藝術"
+        )),
+        Map.entry("節慶", List.of(
+            "跨年", "聖誕", "過年", "春節", "元宵", "燈會", 
+            "萬聖節", "情人節", "嘉年華", "祭典"
+        ))
+    );
+
+    // ==================== 權威與黑名單 (保持先前優化的版本) ====================
+
     public static final Set<String> AUTHORITY_DOMAINS = Set.of(
         "accupass.com", "opentix.life", "tixcraft.com", "kktix.com",
         "indievox.com", "ticket.com.tw", "udnfunlife.com", "kham.com.tw",
-        "ticket.ibon.com.tw", "famiport.com.tw"
+        "ticket.ibon.com.tw", "famiport.com.tw",
+        // IG 懶人包媒體
+        "popdaily.com.tw", "elle.com", "vogue.com.tw", "marieclaire.com.tw", 
+        "womenshealthmag.com", "gq.com.tw", "travel.yahoo.com.tw", 
+        "girlstalk.cc", "niusnews.com", "shoppingdesign.com.tw", "500times.udn.com"
     );
 
     public static final Set<String> NOISE_KEYWORDS = Set.of(
+        // 學術論文
+        "碩士論文", "博士論文", "學位論文", "研究生", "指導教授", "口試", 
+        "摘要", "Abstract", "參考文獻", "引用", "文獻探討", "研究方法", 
+        "研究動機", "研究目的", "關鍵詞", "Keywords", "DOI", "PDF下載", 
+        "期刊", "學報", "專題製作", "畢業製作", "成果報告书",
+        // 公文與工具
         "決算書", "預算書", "財報", "報表", "公告", "標案", "決標", "開標", "會議記錄", "公報",
         "有線電視", "第四台", "寬頻", "光纖", "維修", "客服", "安裝", "費率", "繳費",
         "徵才", "職缺", "招募", "求職", "人力銀行", "工讀", "實習",
@@ -70,7 +138,6 @@ public final class Constants {
         "東京", "大阪", "京都", "北海道", "首爾", "釜山", "曼谷", "機票", "入境", "簽證"
     );
 
-    // ★ QueryUnderstanding 需要這個
     public static final Set<String> EVENT_TYPES = Set.of(
         "演唱會", "音樂會", "音樂節", "展覽", "特展", "市集", "夜市",
         "講座", "工作坊", "派對", "路跑", "馬拉松", "親子", "電影",
@@ -94,7 +161,6 @@ public final class Constants {
         Map.entry("親子", 1.2), Map.entry("免費", 1.1)
     );
 
-    // ★ EventInfoExtractor 可能需要這個 (如果它用這個名字)
     public static final Map<String, String> EVENT_TYPE_KEYWORDS = Map.ofEntries(
         Map.entry("演唱會", "演唱會"), Map.entry("concert", "演唱會"),
         Map.entry("音樂會", "音樂會"), Map.entry("音樂節", "音樂節"),
@@ -103,14 +169,6 @@ public final class Constants {
         Map.entry("講座", "講座"), Map.entry("工作坊", "工作坊"),
         Map.entry("路跑", "路跑"), Map.entry("馬拉松", "路跑"),
         Map.entry("親子", "親子活動"), Map.entry("體驗", "親子活動")
-    );
-
-    public static final Map<String, List<String>> CATEGORY_EXPANSIONS = Map.ofEntries(
-        Map.entry("市集", List.of("文創市集", "手作市集", "假日市集", "聖誕市集", "二手市集")),
-        Map.entry("展覽", List.of("特展", "回顧展", "快閃店", "體驗展")),
-        Map.entry("音樂", List.of("音樂節", "音樂祭", "live house", "聽團")),
-        Map.entry("親子", List.of("親子活動", "體驗營", "繪本", "說故事")),
-        Map.entry("戶外", List.of("露營", "野餐", "登山", "健行", "路跑"))
     );
 
     public static final Map<String, List<String>> SYNONYMS = Map.ofEntries(
@@ -125,7 +183,9 @@ public final class Constants {
     public static final Set<String> EXCLUDED_DOMAINS = Set.of(
         "x.com", "twitter.com", "ptt.cc", "dcard.tw", 
         "amazon.co.jp", "rakuten.co.jp", "yahoo.co.jp", 
-        "booking.com", "agoda.com", "trivago.com", "hotels.com"
+        "booking.com", "agoda.com", "trivago.com", "hotels.com",
+        "facebook.com", "instagram.com", 
+        "ndltd.ncl.edu.tw", "airitilibrary.com", "scholar.google.com.tw"
     );
 
     public static final Set<String> APPLICATION_KEYWORDS = Set.of(
