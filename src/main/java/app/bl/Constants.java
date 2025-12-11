@@ -345,21 +345,25 @@ public final class Constants {
 
     /**
      * 判斷是否為海外內容
+     * 放寬條件：需要至少 2 個海外關鍵字，且沒有台灣地名
      */
     public static boolean isLikelyForeign(String text) {
-        if (text == null) return false;
+        if (text == null || text.isEmpty()) return false;
         String lower = text.toLowerCase();
         
+        // 先檢查是否有台灣地名，有的話直接不是海外
+        if (hasTaiwanLocation(text)) return false;
+        
+        // 只用核心海外關鍵字判斷（更嚴格的子集）
         int foreignCount = 0;
-        for (String key : FOREIGN_KEYWORDS) {
+        for (String key : FOREIGN_KEYWORDS_CORE) {
             if (lower.contains(key.toLowerCase())) {
                 foreignCount++;
-                if (foreignCount >= 2) break;
             }
         }
         
-        if (foreignCount == 0) return false;
-        return !hasTaiwanLocation(text);
+        // 需要至少 2 個核心海外關鍵字才判定為海外
+        return foreignCount >= 2;
     }
 
     /**

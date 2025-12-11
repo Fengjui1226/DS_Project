@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set; // Added missing import
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -18,7 +19,7 @@ import app.da.GoogleConnector;
 import static app.bl.Constants.*;
 
 /**
- * SearchEngine v7.0 - 重構版（使用統一常數）
+ * SearchEngine v7.1 - Fixed Compilation Errors (Missing methods and imports)
  */
 public class SearchEngine {
 
@@ -35,7 +36,7 @@ public class SearchEngine {
 
     public static List<PageNode> search(String query, UserProfile user) throws Exception {
         System.out.println("\n╔═══════════════════════════════════════════════════════╗");
-        System.out.println("║   🔍 EventFinder v7.0 (Refactored)                    ║");
+        System.out.println("║   🔍 EventFinder v7.1 (Debugged)                      ║");
         System.out.println("╚═══════════════════════════════════════════════════════╝");
         System.out.println("[Query] " + query);
 
@@ -106,21 +107,56 @@ public class SearchEngine {
             }
         }
 
+        // ============ 新版過濾邏輯 ============
+        int currentYear = today.getYear();
         List<PageNode> filteredPages = new ArrayList<>();
+        int foreignFiltered = 0;
+        int oldYearFiltered = 0;
+        
         for (PageNode p : pages) {
+            String title = (p.getTitle() != null) ? p.getTitle() : "";
             String content = (p.getTextContent() != null) ? p.getTextContent() : "";
-            String combined = p.getTitle() + " " + content;
-            if (Constants.isLikelyForeign(combined)) {
+            String combined = title + " " + content;
+            
+            // 1. 海外內容嚴格過濾（標題有海外地名直接移除）
+            if (containsForeignLocation(title)) {
+                foreignFiltered++;
+                System.out.println("  [過濾] 海外內容: " + truncate(title, 40));
                 continue;
             }
+            
+            // 2. 檢查年份 - 過去年份直接過濾
+            int detectedYear = detectYearInText(combined);
+            if (detectedYear > 0 && detectedYear < currentYear) {
+                oldYearFiltered++;
+                System.out.println("  [過濾] 過期年份(" + detectedYear + "): " + truncate(title, 40));
+                continue;
+            }
+            
+            // 3. 年份加分機制
+            if (detectedYear == currentYear) {
+                p.addScore(15);  // 今年 +15
+            } else if (detectedYear == currentYear + 1) {
+                p.addScore(25);  // 明年 +25（2026 大加分）
+            } else if (detectedYear == 0) {
+                // 無年份，檢查是否有台灣地名來判斷相關性
+                if (!hasTaiwanLocation(combined)) {
+                    p.addScore(-10);  // 無年份且無台灣地名，扣分
+                }
+            }
+            
             filteredPages.add(p);
         }
         pages = filteredPages;
+        
+        System.out.printf("[Filter] 海外過濾: %d, 舊年份過濾: %d, 保留: %d%n", 
+                          foreignFiltered, oldYearFiltered, pages.size());
 
         if (effectiveCity != null && !effectiveCity.isEmpty()) {
             pages = filterByEffectiveCity(pages, effectiveCity);
         }
 
+        // 日期過期檢查（有明確日期的才過濾）
         List<PageNode> validPages = new ArrayList<>();
         List<PageNode> expiredPages = new ArrayList<>();
         for (PageNode p : pages) {
@@ -490,6 +526,18 @@ public class SearchEngine {
         if (text == null) return null;
         int currentYear = today.getYear();
 
+        // 0. 先檢查標題是否明確標記過去年份（如「2024全台活動」「2023精選」）
+        //    這類標題通常沒有完整日期，但年份本身就說明是過期內容
+        Pattern yearOnlyPattern = Pattern.compile("(20[0-2][0-9])(?:年|全台|精選|最新|活動|整理|懶人包)");
+        Matcher yearOnlyMatcher = yearOnlyPattern.matcher(text);
+        if (yearOnlyMatcher.find()) {
+            int mentionedYear = Integer.parseInt(yearOnlyMatcher.group(1));
+            if (mentionedYear < currentYear) {
+                // 明確過去年份，標記為該年年底（確保被判定過期）
+                return LocalDate.of(mentionedYear, 12, 31);
+            }
+        }
+
         // 1. 完整年份格式
         Pattern p1 = Pattern.compile("(20\\d{2})\\s*?[./年\\-]\\s*?(0?[1-9]|1[0-2])\\s*?[./月\\-]\\s*?(0?[1-9]|[12]\\d|3[01])");
         Matcher m1 = p1.matcher(text);
@@ -520,12 +568,25 @@ public class SearchEngine {
                 int month = Integer.parseInt(m2.group(1));
                 int day = Integer.parseInt(m2.group(2));
                 
+                // 先檢查前面有沒有年份
                 int start = m2.start();
                 if (start >= 4) {
-                    String prefix = text.substring(start - 5, start);
+                    String prefix = text.substring(Math.max(0, start - 10), start);
                     Matcher yearMatcher = Pattern.compile("(20\\d{2})").matcher(prefix);
                     if (yearMatcher.find()) {
                         int foundYear = Integer.parseInt(yearMatcher.group(1));
+                        return LocalDate.of(foundYear, month, day);
+                    }
+                }
+                
+                // 沒有年份時，檢查整個文字中是否有過去年份的暗示
+                Matcher anyYearMatcher = Pattern.compile("(20[0-2][0-9])").matcher(text);
+                if (anyYearMatcher.find()) {
+                    int foundYear = Integer.parseInt(anyYearMatcher.group(1));
+                    // 如果文中提到的年份是過去的，用那個年份
+                    if (foundYear < currentYear) {
+                        return LocalDate.of(foundYear, month, day);
+                    } else if (foundYear == currentYear || foundYear == currentYear + 1) {
                         return LocalDate.of(foundYear, month, day);
                     }
                 }
@@ -573,6 +634,100 @@ public class SearchEngine {
             }
         }
         System.out.println("─".repeat(70));
+    }
+
+    // ============ 海外地名檢測 ============
+    private static final Set<String> FOREIGN_LOCATIONS = Set.of(
+        // 日本
+        "日本", "東京", "大阪", "京都", "北海道", "沖繩", "名古屋", "福岡", "橫濱", "神戶",
+        "奈良", "札幌", "鹿兒島", "廣島", "仙台", "金澤", "箱根", "富士山", "淺草", "銀座",
+        "新宿", "涉谷", "原宿", "秋葉原", "上野", "池袋", "六本木", "表參道", "青山",
+        // 韓國
+        "韓國", "首爾", "釜山", "濟州", "仁川", "大邱", "明洞", "弘大", "江南", "梨泰院",
+        "東大門", "南大門", "景福宮", "北村", "三清洞", "狎鷗亭", "聖水洞",
+        // 中國大陸
+        "中國", "大陸", "北京", "上海", "廣州", "深圳", "杭州", "成都", "重慶", "西安", 
+        "南京", "蘇州", "武漢", "天津", "青島", "廈門", "昆明", "三亞", "海南",
+        // 港澳
+        "香港", "澳門", "九龍", "旺角", "尖沙咀", "銅鑼灣", "中環",
+        // 東南亞
+        "泰國", "曼谷", "清邁", "普吉", "芭達雅", "新加坡", "馬來西亞", "吉隆坡", "檳城",
+        "越南", "河內", "胡志明", "峴港", "印尼", "峇里島", "巴里", "雅加達", "菲律賓", "馬尼拉",
+        "長灘島", "宿霧", "柬埔寨", "吳哥窟", "寮國", "緬甸",
+        // 歐美
+        "美國", "紐約", "洛杉磯", "舊金山", "拉斯維加斯", "邁阿密", "西雅圖", "芝加哥", "波士頓",
+        "英國", "倫敦", "法國", "巴黎", "德國", "柏林", "慕尼黑", "義大利", "羅馬", "米蘭",
+        "威尼斯", "佛羅倫斯", "西班牙", "馬德里", "巴塞隆納", "荷蘭", "阿姆斯特丹",
+        "瑞士", "蘇黎世", "奧地利", "維也納", "捷克", "布拉格", "希臘", "雅典", "土耳其", "伊斯坦堡",
+        // 其他
+        "澳洲", "雪梨", "墨爾本", "紐西蘭", "奧克蘭", "杜拜", "埃及", "摩洛哥", "肯亞", "南非"
+    );
+    
+    /**
+     * 檢查標題是否包含海外地名
+     */
+    private static boolean containsForeignLocation(String title) {
+        if (title == null || title.isEmpty()) return false;
+        String lower = title.toLowerCase();
+        
+        // 先檢查是否有台灣地名（有的話不算海外）
+        if (hasTaiwanLocation(title)) return false;
+        
+        for (String loc : FOREIGN_LOCATIONS) {
+            if (lower.contains(loc.toLowerCase())) {
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * 從文字中偵測年份（回傳最顯著的年份，0 表示沒有）
+     */
+    private static int detectYearInText(String text) {
+        if (text == null || text.isEmpty()) return 0;
+        
+        // 優先找標題格式的年份（如「2024全台活動」「2025年市集」）
+        Pattern titleYearPattern = Pattern.compile("(20[2-3][0-9])(?:年|全台|精選|最新|活動|整理|懶人包|市集|展覽|演唱會)");
+        Matcher m1 = titleYearPattern.matcher(text);
+        if (m1.find()) {
+            return Integer.parseInt(m1.group(1));
+        }
+        
+        // 再找一般年份格式
+        Pattern yearPattern = Pattern.compile("(20[2-3][0-9])(?:[./年\\-]|\\s)");
+        Matcher m2 = yearPattern.matcher(text);
+        if (m2.find()) {
+            return Integer.parseInt(m2.group(1));
+        }
+        
+        // 最後找獨立年份
+        Pattern standaloneYear = Pattern.compile("\\b(20[2-3][0-9])\\b");
+        Matcher m3 = standaloneYear.matcher(text);
+        if (m3.find()) {
+            return Integer.parseInt(m3.group(1));
+        }
+        
+        return 0;
+    }
+
+    /**
+     * 檢查是否包含台灣相關地名 (Added missing method)
+     */
+    private static boolean hasTaiwanLocation(String text) {
+        if (text == null || text.isEmpty()) return false;
+        String lower = text.toLowerCase();
+        return lower.contains("台灣") || lower.contains("taiwan") || 
+               lower.contains("台北") || lower.contains("新北") || 
+               lower.contains("桃園") || lower.contains("台中") || 
+               lower.contains("台南") || lower.contains("高雄") || 
+               lower.contains("基隆") || lower.contains("新竹") || 
+               lower.contains("嘉義") || lower.contains("苗栗") || 
+               lower.contains("彰化") || lower.contains("南投") || 
+               lower.contains("雲林") || lower.contains("屏東") || 
+               lower.contains("宜蘭") || lower.contains("花蓮") || 
+               lower.contains("台東") || lower.contains("澎湖") ||
+               lower.contains("金門") || lower.contains("馬祖");
     }
 
     public static Tree getLastSearchTree() { return lastSearchTree; }
