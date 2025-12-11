@@ -2,6 +2,8 @@ package app.bl;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -10,7 +12,11 @@ import java.util.regex.Pattern;
 import static app.bl.Constants.*;
 
 /**
- * EventInfoExtractor v2.0 - 重構版（使用統一常數）
+ * EventInfoExtractor v3.1 - 完整修復版
+ * * 結合了 v2.0 的完整 Regex 規則與 v3.0 的智慧日期邏輯。
+ * * 功能：
+ * 1. [智慧日期] 優先找未來日期，過濾舊年份。
+ * 2. [完整提取] 包含時間、地點、票價、主辦單位的提取邏輯。
  */
 public class EventInfoExtractor {
 
@@ -56,6 +62,8 @@ public class EventInfoExtractor {
         }
     }
 
+    // ================= 正則表達式庫 (完整版) =================
+
     private static final List<Pattern> DATE_PATTERNS = List.of(
         Pattern.compile("(\\d{4})[/.-](\\d{1,2})[/.-](\\d{1,2})\\s*[~至到-]\\s*(\\d{4})[/.-](\\d{1,2})[/.-](\\d{1,2})"),
         Pattern.compile("(\\d{4})[/.-](\\d{1,2})[/.-](\\d{1,2})\\s*[~至到-]\\s*(\\d{1,2})[/.-](\\d{1,2})"),
@@ -90,18 +98,25 @@ public class EventInfoExtractor {
         Pattern.compile("協辦[：:]\\s*(.{2,30})")
     );
 
+    // ================= 主要提取邏輯 =================
+
     public static EventInfo extract(String text) {
         if (text == null || text.isEmpty()) {
             return new EventInfo();
         }
 
         EventInfo info = new EventInfo();
-        extractDates(text, info);
+        
+        // 1. 日期提取 (使用 v3.0 的智慧邏輯)
+        extractSmartDates(text, info);
+        
+        // 2. 其他資訊提取 (恢復 v2.0 的完整邏輯)
         extractTimes(text, info);
         extractVenue(text, info);
         extractPrice(text, info);
         extractOrganizer(text, info);
         extractEventType(text, info);
+        
         info.completenessScore = calculateCompleteness(info);
 
         return info;
@@ -150,58 +165,88 @@ public class EventInfoExtractor {
         System.out.println("✅ 結構化提取完成，" + extracted + "/" + pages.size() + " 個結果有詳細資訊");
     }
 
-    private static void extractDates(String text, EventInfo info) {
+    // ================= 智慧日期提取 (v3.0 Logic) =================
+
+    private static void extractSmartDates(String text, EventInfo info) {
         LocalDate today = LocalDate.now();
         int currentYear = today.getYear();
+        List<LocalDate> foundDates = new ArrayList<>();
 
+        // 掃描所有可能的日期
         for (Pattern pattern : DATE_PATTERNS) {
             Matcher matcher = pattern.matcher(text);
-            if (matcher.find()) {
-                try {
-                    int groups = matcher.groupCount();
-
-                    if (groups >= 6 && matcher.group(4) != null) {
-                        int y1 = parseYear(matcher.group(1), currentYear);
-                        int m1 = Integer.parseInt(matcher.group(2));
-                        int d1 = Integer.parseInt(matcher.group(3));
-                        info.startDate = LocalDate.of(y1, m1, d1);
-
-                        int y2 = parseYear(matcher.group(4), currentYear);
-                        int m2 = Integer.parseInt(matcher.group(5));
-                        int d2 = Integer.parseInt(matcher.group(6));
-                        info.endDate = LocalDate.of(y2, m2, d2);
-                        return;
-
-                    } else if (groups >= 3) {
-                        int year = currentYear;
-                        int month, day;
-
-                        if (matcher.group(1).length() <= 2) {
-                            month = Integer.parseInt(matcher.group(1));
-                            day = Integer.parseInt(matcher.group(2));
-                            LocalDate candidate = LocalDate.of(currentYear, month, day);
-                            if (candidate.isBefore(today.minusMonths(2))) {
-                                year = currentYear + 1;
-                            }
-                        } else {
-                            year = parseYear(matcher.group(1), currentYear);
-                            month = Integer.parseInt(matcher.group(2));
-                            day = Integer.parseInt(matcher.group(3));
-                        }
-
-                        info.startDate = LocalDate.of(year, month, day);
-                        return;
-                    }
-                } catch (Exception e) {
-                    // continue
+            while (matcher.find()) { 
+                LocalDate date = parseDateFromMatcher(matcher, currentYear);
+                if (date != null) {
+                    foundDates.add(date);
                 }
             }
         }
+
+        if (foundDates.isEmpty()) return;
+
+        // 規則 A: 忽略太舊的日期 (超過 1 年前)
+        foundDates.removeIf(d -> d.isBefore(today.minusDays(365)));
+
+        // 規則 B: 優先找「未來日期」
+        List<LocalDate> futureDates = new ArrayList<>();
+        List<LocalDate> pastDates = new ArrayList<>();
+
+        for (LocalDate d : foundDates) {
+            if (d.isAfter(today) || d.isEqual(today)) {
+                futureDates.add(d);
+            } else {
+                pastDates.add(d);
+            }
+        }
+
+        // 決策
+        if (!futureDates.isEmpty()) {
+            Collections.sort(futureDates);
+            info.startDate = futureDates.get(0);
+            if (futureDates.size() > 1) {
+                info.endDate = futureDates.get(futureDates.size() - 1);
+            }
+        } else if (!pastDates.isEmpty()) {
+            // 如果只有過去日期，取「離今天最近的」
+            pastDates.sort(Collections.reverseOrder());
+            info.startDate = pastDates.get(0);
+        }
     }
+
+    private static LocalDate parseDateFromMatcher(Matcher matcher, int currentYear) {
+        try {
+            int y = currentYear, m = 0, d = 0;
+            // 處理不同的 regex group
+            if (matcher.groupCount() >= 6 && matcher.group(4) != null) {
+                 // 區間日期 (yyyy-mm-dd ~ yyyy-mm-dd) 的第一組
+                 y = parseYear(matcher.group(1), currentYear);
+                 m = Integer.parseInt(matcher.group(2));
+                 d = Integer.parseInt(matcher.group(3));
+            } else if (matcher.groupCount() >= 3) {
+                // yyyy-mm-dd
+                y = parseYear(matcher.group(1), currentYear);
+                m = Integer.parseInt(matcher.group(2));
+                d = Integer.parseInt(matcher.group(3));
+            } else if (matcher.groupCount() == 2) {
+                // mm-dd (預設今年)
+                m = Integer.parseInt(matcher.group(1));
+                d = Integer.parseInt(matcher.group(2));
+                if (LocalDate.now().getMonthValue() >= 11 && m <= 2) {
+                    y = currentYear + 1;
+                }
+            }
+            return LocalDate.of(y, m, d);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // ================= 輔助提取方法 (v2.0 Restored) =================
 
     private static int parseYear(String yearStr, int currentYear) {
         int year = Integer.parseInt(yearStr);
-        if (year < 200) {
+        if (year < 200) { // 民國年處理
             year += 1911;
         }
         return year;
@@ -227,7 +272,6 @@ public class EventInfoExtractor {
     }
 
     private static void extractVenue(String text, EventInfo info) {
-        // 先找已知場館（使用 Constants）
         for (Map.Entry<String, String> entry : VENUE_CITY.entrySet()) {
             if (text.contains(entry.getKey())) {
                 info.venue = entry.getKey();
@@ -235,8 +279,7 @@ public class EventInfoExtractor {
                 break;
             }
         }
-
-        // 嘗試提取地址
+        // 簡單地址提取
         Pattern addressPattern = Pattern.compile(
             "(台北|新北|桃園|台中|台南|高雄|基隆|新竹|嘉義|花蓮|台東|宜蘭|苗栗|彰化|南投|雲林|屏東|澎湖|金門|連江)" +
             "[市縣]?.{2,30}[路街道巷弄號樓]"
@@ -257,7 +300,6 @@ public class EventInfoExtractor {
             info.priceMax = 0;
             return;
         }
-
         for (Pattern pattern : PRICE_PATTERNS) {
             Matcher matcher = pattern.matcher(text);
             if (matcher.find()) {
@@ -269,9 +311,7 @@ public class EventInfoExtractor {
                         info.priceMax = info.priceMin;
                     }
                     return;
-                } catch (Exception e) {
-                    // ignore
-                }
+                } catch (Exception e) {}
             }
         }
     }
@@ -302,7 +342,6 @@ public class EventInfoExtractor {
 
     private static double calculateCompleteness(EventInfo info) {
         double score = 0;
-
         if (info.startDate != null) {
             score += 20;
             if (info.endDate != null) score += 10;
@@ -313,7 +352,6 @@ public class EventInfoExtractor {
         if (info.isFree || info.priceMin != null) score += 20;
         if (info.organizer != null) score += 10;
         if (info.eventType != null) score += 5;
-
         return score;
     }
 }
