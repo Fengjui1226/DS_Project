@@ -5,7 +5,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -15,100 +14,28 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import app.da.GoogleConnector;
-import app.da.LocationRecognizer;
+
+import static app.bl.Constants.*;
 
 /**
- * SearchEngine v6.3 - 日期嚴格模式版
- * * 修正重點：
- * 1. 日期解析：完全移除自動推算明年的邏輯。沒寫年份一律視為今年，寧缺勿濫。
- * 2. 智慧回溯：保留 Lookbehind 機制，盡力找回被漏掉的年份數字。
- * 3. 關鍵字與地標：保留前一版的擴充內容。
+ * SearchEngine v7.0 - 重構版（使用統一常數）
  */
 public class SearchEngine {
 
     private static final int MAX_GOOGLE_RESULTS = 40;
-    private static final int MAX_DEEP_CRAWL_COUNT = 15;
+    private static final int MAX_DEEP_CRAWL_COUNT = 40;
     private static final boolean ENABLE_CRAWLING = true;
-    private static final int SEARCH_TIMEOUT_MS = 8000;
-    private static final int CRAWL_PARALLEL_LIMIT = 15;
+    private static final int SEARCH_TIMEOUT_MS = 20000;
+    private static final int CRAWL_PARALLEL_LIMIT = 20;
     private static final ExecutorService CRAWL_EXECUTOR =
             Executors.newFixedThreadPool(CRAWL_PARALLEL_LIMIT);
-
-    private static final List<String> EVENT_TERMS = List.of(
-            "活動", "展覽", "音樂", "演唱會", "市集", "節慶",
-            "festival", "concert", "exhibition", "event",
-            "表演", "藝術", "體驗", "親子", "戶外", "講座"
-    );
-
-    private static final Map<String, List<String>> CATEGORY_EXPANSIONS = Map.ofEntries(
-            Map.entry("市集", List.of("文創市集", "手作市集", "假日市集", "聖誕市集", "週末市集", "二手市集", "快閃店")),
-            Map.entry("展覽", List.of("藝術展", "美術展", "攝影展", "設計展", "特展", "回顧展", "博覽會", "快閃展", "沈浸式體驗", "museum", "gallery")),
-            Map.entry("音樂", List.of("音樂會", "音樂節", "樂團演出", "live house", "獨立音樂", "祭", "聽團", "管弦樂", "爵士")),
-            Map.entry("演唱會", List.of("演唱會", "巡迴演唱會", "見面會", "粉絲見面會", "專場")),
-            Map.entry("親子", List.of("親子活動", "兒童劇", "DIY", "體驗營", "夏令營", "冬令營", "繪本", "說故事", "親子景點", "觀光工廠")),
-            Map.entry("戶外", List.of("露營", "野餐", "登山", "健行", "SUP", "路跑", "馬拉松")),
-            Map.entry("festival", List.of("market", "carnival", "fair", "party"))
-    );
-
-    private static final Set<String> FOREIGN_KEYWORDS = Set.of(
-            "日本", "東京", "大阪", "北海道", "沖繩", "京都", "奈良", "名古屋", "福岡", "橫濱", 
-            "涉谷", "新宿", "銀座", "池袋", "原宿", "淺草", "秋葉原", "神戶", "廣島", "仙台",
-            "金澤", "札幌", "函館", "輕井澤", "富士山", "鎌倉", "箱根", "河口湖",
-            "首爾", "釜山", "韓國", "濟州", "仁川", "明洞", "弘大", "江南", "東大門",
-            "香港", "澳門", "上海", "北京", "深圳", "廣州", "成都", "杭州", "蘇州", "西安",
-            "曼谷", "泰國", "新加坡", "馬來西亞", "越南", "峇里島", "印尼", "菲律賓", "吉隆坡",
-            "清邁", "普吉島", "河內", "胡志明", "柬埔寨", "寮國", "緬甸",
-            "紐西蘭", "新西蘭", "奧克蘭", "威靈頓", "基督城", "皇后鎮", "澳洲", "澳大利亞",
-            "雪梨", "悉尼", "墨爾本", "布里斯本", "伯斯", "黃金海岸",
-            "美國", "歐洲", "倫敦", "巴黎", "紐約", "洛杉磯", "舊金山", "芝加哥", "西雅圖",
-            "德國", "法國", "義大利", "西班牙", "荷蘭", "瑞士", "奧地利", "捷克",
-            "羅馬", "米蘭", "佛羅倫斯", "巴塞隆納", "阿姆斯特丹", "維也納", "布拉格",
-            "機票", "自由行", "入境", "簽證", "匯率", "代購", "旅遊攻略", "行程規劃",
-            "海外", "出國", "國外", "境外", "跨境", "航班"
-    );
-
-    private static final Map<String, List<String>> EXPANSION = Map.of(
-            "市集", List.of("文創市集", "手作市集", "假日市集", "聖誕市集", "創意市集", "跳蚤市集"),
-            "展覽", List.of("特展", "藝術展", "美術館展覽", "主題展覽", "攝影展", "設計展"),
-            "音樂", List.of("音樂祭", "音樂會", "演唱會", "live演出", "音樂節"),
-            "親子", List.of("親子活動", "家庭活動", "兒童活動", "親子市集"),
-            "運動", List.of("路跑", "馬拉松", "健走", "運動賽事", "自行車")
-    );
-
-    private static final Map<String, String> CITY_ALIASES = Map.ofEntries(
-            Map.entry("台北", "台北"), Map.entry("臺北", "台北"), Map.entry("taipei", "台北"),
-            Map.entry("新北", "新北"), Map.entry("板橋", "新北"),
-            Map.entry("台中", "台中"), Map.entry("臺中", "台中"), Map.entry("taichung", "台中"),
-            Map.entry("西屯", "台中"), Map.entry("南屯", "台中"),
-            Map.entry("台南", "台南"), Map.entry("臺南", "台南"), Map.entry("tainan", "台南"),
-            Map.entry("高雄", "高雄"), Map.entry("kaohsiung", "高雄"),
-            Map.entry("桃園", "桃園"), Map.entry("中壢", "桃園"),
-            Map.entry("基隆", "基隆"), Map.entry("新竹", "新竹"),
-            Map.entry("嘉義", "嘉義"), Map.entry("花蓮", "花蓮"), Map.entry("台東", "台東"),
-            Map.entry("宜蘭", "宜蘭"), Map.entry("屏東", "屏東"), Map.entry("彰化", "彰化"),
-            Map.entry("南投", "南投"), Map.entry("苗栗", "苗栗"), Map.entry("雲林", "雲林")
-    );
-
-    private static final Set<String> TAIWAN_LANDMARKS = Set.of(
-            "華山", "松菸", "駁二", "高流", "北流", "小巨蛋", "大巨蛋", "兩廳院", "國家音樂廳",
-            "故宮", "北美館", "當代藝術館", "科博館", "海生館", "衛武營", "信義區", "西門町",
-            "忠孝", "中山", "士林", "淡水", "九份", "平溪", "陽明山", "墾丁", "日月潭",
-            "阿里山", "太魯閣", "清境", "草悟道", "勤美", "逢甲", "一中街", "東海", "秋紅谷",
-            "審計新村", "光復新村", "歌劇院", "美術館", "綠園道", "愛河",
-            "新光三越", "sogo", "遠百", "誠品", "國父紀念館", "中正紀念堂"
-    );
-
-    private static final Set<String> EXCLUDED_DOMAINS = Set.of(
-            "x.com", "twitter.com", "ptt.cc",
-            "amazon.co.jp", "rakuten.co.jp", "yahoo.co.jp", "booking.com", "agoda.com"
-    );
 
     private static Tree lastSearchTree;
     private static List<PageNode> lastResults = new ArrayList<>();
 
     public static List<PageNode> search(String query, UserProfile user) throws Exception {
         System.out.println("\n╔═══════════════════════════════════════════════════════╗");
-        System.out.println("║   🔍 EventFinder v6.3 (Strict Date Mode)              ║");
+        System.out.println("║   🔍 EventFinder v7.0 (Refactored)                    ║");
         System.out.println("╚═══════════════════════════════════════════════════════╝");
         System.out.println("[Query] " + query);
 
@@ -144,7 +71,7 @@ public class SearchEngine {
 
         System.out.println("\n[Step 1] 呼叫 Google API...");
         List<GoogleConnector.Result> googleResults =
-                GoogleConnector.search(refinedQuery, MAX_GOOGLE_RESULTS, 3000); 
+                GoogleConnector.search(refinedQuery, MAX_GOOGLE_RESULTS, 3000);
         System.out.println("[Google] 取得 " + googleResults.size() + " 個結果");
 
         List<String> queryTokens = parseQueryTokens(query);
@@ -157,8 +84,8 @@ public class SearchEngine {
             PageNode page = createPageNode(r, query, queryTokens, effectiveCity, today);
             
             if (page != null) {
-                if (isLikelyForeign(page.getTitle(), "")) {
-                    continue; 
+                if (Constants.isLikelyForeign(page.getTitle())) {
+                    continue;
                 }
                 pages.add(page);
             }
@@ -182,10 +109,9 @@ public class SearchEngine {
         List<PageNode> filteredPages = new ArrayList<>();
         for (PageNode p : pages) {
             String content = (p.getTextContent() != null) ? p.getTextContent() : "";
-            if (isLikelyForeign(p.getTitle(), content)) {
-                if (!hasTaiwanCity(p.getTitle() + " " + content)) {
-                    continue; 
-                }
+            String combined = p.getTitle() + " " + content;
+            if (Constants.isLikelyForeign(combined)) {
+                continue;
             }
             filteredPages.add(p);
         }
@@ -262,27 +188,29 @@ public class SearchEngine {
             boolean matchByText = combinedLower.contains(targetLower);
 
             if (!matchByText) {
+                // 特定城市的地標對照
                 if ("台北".equals(normalizedTarget)) {
-                    if (combinedLower.contains("大台北") || combinedLower.contains("雙北") || 
-                        combinedLower.contains("北北基") || combinedLower.contains("新北") || 
+                    if (combinedLower.contains("大台北") || combinedLower.contains("雙北") ||
+                        combinedLower.contains("北北基") || combinedLower.contains("新北") ||
                         combinedLower.contains("信義區") || combinedLower.contains("松菸")) {
                         matchByText = true;
                     }
                 } else if ("台中".equals(normalizedTarget)) {
-                    if (combinedLower.contains("勤美") || combinedLower.contains("草悟道") || 
-                        combinedLower.contains("審計新村") || combinedLower.contains("歌劇院") || 
+                    if (combinedLower.contains("勤美") || combinedLower.contains("草悟道") ||
+                        combinedLower.contains("審計新村") || combinedLower.contains("歌劇院") ||
                         combinedLower.contains("逢甲") || combinedLower.contains("西屯")) {
                         matchByText = true;
                     }
                 } else if ("高雄".equals(normalizedTarget)) {
-                    if (combinedLower.contains("駁二") || combinedLower.contains("衛武營") || 
+                    if (combinedLower.contains("駁二") || combinedLower.contains("衛武營") ||
                         combinedLower.contains("高流") || combinedLower.contains("愛河")) {
                         matchByText = true;
                     }
                 }
             }
 
-            if (isLikelyForeign(title, text) && !hasTaiwanCity(title + " " + text)) {
+            String combined = title + " " + text;
+            if (Constants.isLikelyForeign(combined)) {
                 continue;
             }
 
@@ -349,7 +277,7 @@ public class SearchEngine {
             if (content != null) {
                 String originCity = page.getCity();
                 if (originCity == null || originCity.isEmpty() || "全台".equals(originCity)) {
-                    String cityFromText = LocationRecognizer.extractCity(
+                    String cityFromText = extractCity(
                             ((crawledTitle != null) ? crawledTitle + " " : "") + content
                     );
                     if (cityFromText != null && !cityFromText.isEmpty()) {
@@ -399,7 +327,7 @@ public class SearchEngine {
     private static String expandQuery(String q) {
         StringBuilder result = new StringBuilder(q);
         String lower = q.toLowerCase();
-        for (Map.Entry<String, List<String>> e : EXPANSION.entrySet()) {
+        for (Map.Entry<String, List<String>> e : CATEGORY_EXPANSIONS.entrySet()) {
             if (lower.contains(e.getKey())) {
                 for (String add : e.getValue()) {
                     if (!lower.contains(add.toLowerCase())) {
@@ -432,7 +360,7 @@ public class SearchEngine {
             }
         }
 
-        String city = LocationRecognizer.extractCity(r.title);
+        String city = extractCity(r.title);
         if (city == null || city.isEmpty()) city = "全台";
 
         String domain = extractDomain(r.link);
@@ -451,7 +379,7 @@ public class SearchEngine {
         if (!hasEventWord) {
             sb.append(" (活動 OR 展覽 OR 演唱會 OR 音樂會 OR 市集)");
         } else {
-             for (Map.Entry<String, List<String>> e : CATEGORY_EXPANSIONS.entrySet()) {
+            for (Map.Entry<String, List<String>> e : CATEGORY_EXPANSIONS.entrySet()) {
                 String key = e.getKey().toLowerCase();
                 if (lower.contains(key)) {
                     sb.append(" (").append(e.getKey());
@@ -493,51 +421,9 @@ public class SearchEngine {
         return expanded;
     }
 
-    private static boolean isLikelyForeign(String title, String content) {
-        String text = (title + " " + content).toLowerCase();
-        int foreignCount = 0;
-        for (String key : FOREIGN_KEYWORDS) {
-            if (text.contains(key.toLowerCase())) {
-                foreignCount++;
-                if (foreignCount >= 2) break;
-            }
-        }
-        if (foreignCount == 0) return false;
-        if (hasTaiwanCity(text)) return false;
-        
-        return true;
-    }
-
-    private static boolean hasTaiwanCity(String text) {
-        String lower = text.toLowerCase();
-        if (lower.contains("台灣") || lower.contains("臺灣") || lower.contains("taiwan")) return true;
-        for (String alias : CITY_ALIASES.keySet()) {
-            if (lower.contains(alias.toLowerCase())) return true;
-        }
-        for (String landmark : TAIWAN_LANDMARKS) {
-            if (lower.contains(landmark.toLowerCase())) return true;
-        }
-        return false;
-    }
-
     private static String detectCityFromQuery(String query) {
         if (query == null) return null;
-        String lower = query.toLowerCase();
-        for (Map.Entry<String, String> e : CITY_ALIASES.entrySet()) {
-            if (lower.contains(e.getKey().toLowerCase())) return e.getValue();
-        }
-        return null;
-    }
-
-    private static String normalizeCity(String city) {
-        if (city == null) return null;
-        String trimmed = city.trim();
-        if (trimmed.isEmpty()) return trimmed;
-        String lower = trimmed.toLowerCase();
-        for (Map.Entry<String, String> e : CITY_ALIASES.entrySet()) {
-            if (lower.contains(e.getKey().toLowerCase())) return e.getValue();
-        }
-        return trimmed;
+        return extractCity(query);
     }
 
     private static void applyUserCityBoost(List<PageNode> pages, UserProfile user) {
@@ -600,19 +486,17 @@ public class SearchEngine {
         return parseDate(content, today);
     }
 
-    // ★★★★ 核心修正區域：日期嚴格解析 v2.1 ★★★★
     private static LocalDate parseDate(String text, LocalDate today) {
         if (text == null) return null;
         int currentYear = today.getYear();
 
-        // 1. 強力年份解析：允許空格 (2025 / 01 / 01)
+        // 1. 完整年份格式
         Pattern p1 = Pattern.compile("(20\\d{2})\\s*?[./年\\-]\\s*?(0?[1-9]|1[0-2])\\s*?[./月\\-]\\s*?(0?[1-9]|[12]\\d|3[01])");
         Matcher m1 = p1.matcher(text);
         if (m1.find()) {
             try {
-                // 明確年份，絕對信任
-                return LocalDate.of(Integer.parseInt(m1.group(1)), 
-                                   Integer.parseInt(m1.group(2)), 
+                return LocalDate.of(Integer.parseInt(m1.group(1)),
+                                   Integer.parseInt(m1.group(2)),
                                    Integer.parseInt(m1.group(3)));
             } catch (Exception ignored) {}
         }
@@ -622,13 +506,13 @@ public class SearchEngine {
         Matcher mRoc = pRoc.matcher(text);
         if (mRoc.find()) {
             try {
-                return LocalDate.of(Integer.parseInt(mRoc.group(1)) + 1911, 
-                                   Integer.parseInt(mRoc.group(2)), 
+                return LocalDate.of(Integer.parseInt(mRoc.group(1)) + 1911,
+                                   Integer.parseInt(mRoc.group(2)),
                                    Integer.parseInt(mRoc.group(3)));
             } catch (Exception ignored) {}
         }
 
-        // 3. 無年份 (MM/DD) - 這是最容易出錯的地方
+        // 3. 無年份格式
         Pattern p2 = Pattern.compile("(0?[1-9]|1[0-2])\\s*?[./月]\\s*?(0?[1-9]|[12]\\d|3[01])(?:[\\-~～—至到].*?)?");
         Matcher m2 = p2.matcher(text);
         if (m2.find()) {
@@ -636,8 +520,6 @@ public class SearchEngine {
                 int month = Integer.parseInt(m2.group(1));
                 int day = Integer.parseInt(m2.group(2));
                 
-                // ★ 機制 A：Lookbehind (回頭看)
-                // 盡力檢查前面有沒有漏掉的年份，有就用它
                 int start = m2.start();
                 if (start >= 4) {
                     String prefix = text.substring(start - 5, start);
@@ -647,11 +529,6 @@ public class SearchEngine {
                         return LocalDate.of(foundYear, month, day);
                     }
                 }
-
-                // ★ 機制 B：嚴格年份鎖定
-                // 完全移除自動 +1 年的邏輯。
-                // 沒寫年份的，一律視為今年。
-                // 如果這其實是明年的活動但沒寫年份 -> 判定為今年 -> 判定為過期 -> 被濾掉 -> 「寧願少結果也不要錯結果」
                 
                 return LocalDate.of(currentYear, month, day);
                 

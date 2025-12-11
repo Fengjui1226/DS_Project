@@ -30,11 +30,11 @@ public class WebCrawler {
     
     // ============ 設定 ============
     private static final int CONNECT_TIMEOUT_SECONDS = 2;     // ★ 連線超時 2 秒
-    private static final int REQUEST_TIMEOUT_SECONDS = 3;     // ★ 請求超時 3 秒
+    private static final int REQUEST_TIMEOUT_SECONDS = 2;     // ★ 請求超時 3 秒
     private static final int MAX_SUBPAGES = 6;                // 最多爬 6 個子網頁
     private static final int MAX_CONTENT_LENGTH = 100000;     // ★ 100KB（減少）
     private static final int CRAWL_DELAY_MS = 50;             // ★ 爬取間隔（減少）
-    private static final int MAX_SITE_TIME_MS = 4000;         // ★ 每站最多 4 秒
+    private static final int MAX_SITE_TIME_MS = 3000;         // ★ 每站最多 3 秒
     
     // 共享 HttpClient（效能關鍵！）
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()

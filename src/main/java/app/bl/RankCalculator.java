@@ -3,58 +3,16 @@ package app.bl;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
+
+import static app.bl.Constants.*;
 
 /**
- * RankCalculator v3.4 - 加入海外內容懲罰機制
- *
- * 主要設計：
- * 1. 以「關鍵字匹配 + 內文完整度 + 日期新鮮度」為主
- * 2. 同城活動優先
- * 3. 🚨 新增：針對漏網的海外內容進行重扣分
+ * RankCalculator v4.0 - 重構版（使用統一常數）
  */
 public class RankCalculator {
 
-    // ===== 專有名詞（高權重）=====
-    private static final Set<String> PROPER_NOUNS = Set.copyOf(new HashSet<>(List.of(
-        // 大學
-        "政大", "台大", "師大", "清大", "交大", "成大", "中央", "中山", "中興", "北大",
-        "輔大", "東吳", "淡江", "文化", "銘傳", "世新", "實踐", "逢甲", "元智", "長庚",
-        // 場館
-        "華山", "松菸", "駁二", "小巨蛋", "大巨蛋", "國家音樂廳", "兩廳院", "故宮",
-        "北美館", "當代藝術館", "科博館", "科工館", "海生館", "衛武營", "高流", "北流",
-        // 品牌活動
-        "簡單生活節", "大港開唱", "覺醒音樂祭", "春浪", "貢寮海洋音樂祭",
-        // 地標
-        "信義區", "西門", "東區", "大安", "士林", "勤美", "草悟道"
-    )));
-
-    // ===== 申請/徵選類懲罰 =====
-    private static final Set<String> APPLICATION_KEYWORDS = Set.of(
-        "申請", "補助", "辦法", "要點", "徵選", "徵件",
-        "招標", "採購", "規定", "須知", "下載"
-    );
-    private static final double APPLICATION_PENALTY = 0.3;   // 中度懲罰
-
-    // 🚨 新增：海外關鍵字懲罰 (如果漏網之魚跑到這裡，再次重扣分)
-    private static final Set<String> FOREIGN_PENALTY_KEYWORDS = Set.of(
-        "東京", "大阪", "京都", "北海道", "首爾", "釜山", "曼谷", "機票", "入境", "簽證"
-    );
-
-    // ===== 活動類型加分 =====
-    private static final Map<String, Double> EVENT_TYPE_BOOST = Map.ofEntries(
-        Map.entry("演唱會", 1.4), Map.entry("音樂會", 1.3), Map.entry("音樂節", 1.4),
-        Map.entry("展覽", 1.3), Map.entry("特展", 1.3), Map.entry("個展", 1.2),
-        Map.entry("市集", 1.3), Map.entry("夜市", 1.2),
-        Map.entry("講座", 1.2), Map.entry("工作坊", 1.2),
-        Map.entry("派對", 1.2), Map.entry("路跑", 1.3),
-        Map.entry("親子", 1.2), Map.entry("免費", 1.1)
-    );
-
-    // ================= 主入口 =================
+    private static final double APPLICATION_PENALTY = 0.3;
 
     public static void rank(List<PageNode> pages, UserProfile user, String originalQuery) {
         if (pages == null || pages.isEmpty()) return;
@@ -62,14 +20,12 @@ public class RankCalculator {
         System.out.println("\n🎯 開始計算排名分數...");
         System.out.println("📝 原始查詢: " + originalQuery);
 
-        // 先從任一頁面拿 tokens（SearchEngine 已經統一填入）
         List<String> queryTokens = new ArrayList<>();
         for (PageNode p : pages) {
             queryTokens.addAll(p.getTokens());
             break;
         }
 
-        // 專有名詞 / 一般關鍵字拆開
         List<String> properNounTokens = new ArrayList<>();
         List<String> normalTokens = new ArrayList<>();
         for (String token : queryTokens) {
@@ -85,29 +41,19 @@ public class RankCalculator {
 
         LocalDate today = LocalDate.now();
 
-        // 計算分數
         for (PageNode p : pages) {
-            double score = calculatePageScore(
-                p, user, originalQuery,
-                properNounTokens, normalTokens, today
-            );
+            double score = calculatePageScore(p, user, originalQuery, properNounTokens, normalTokens, today);
             p.setTotalScore(score);
         }
 
-        // 標準化到 10~100
         normalizeScores(pages);
-
-        // 由高到低排序
         pages.sort((a, b) -> Double.compare(b.getTotalScore(), a.getTotalScore()));
         System.out.println("✅ 排名計算完成");
     }
 
-    // 舊介面相容
     public static void rank(List<PageNode> pages, UserProfile user) {
         rank(pages, user, null);
     }
-
-    // ================= 內部細節 =================
 
     private static boolean isProperNoun(String token) {
         for (String noun : PROPER_NOUNS) {
@@ -118,27 +64,17 @@ public class RankCalculator {
         return false;
     }
 
-    /**
-     * 核心：計算單一頁面的原始分數（未標準化）
-     */
     private static double calculatePageScore(
-            PageNode p,
-            UserProfile user,
-            String originalQuery,
-            List<String> properNouns,
-            List<String> normalTokens,
-            LocalDate today) {
+            PageNode p, UserProfile user, String originalQuery,
+            List<String> properNouns, List<String> normalTokens, LocalDate today) {
 
-        // ✅ 先從爬蟲階段累積的 score 起跑（內文 match 等）
         double score = p.getScore();
-
         String title = p.getTitle() != null ? p.getTitle() : "";
         String titleLower = title.toLowerCase();
-
         String content = p.getTextContent() != null ? p.getTextContent() : "";
         String contentLower = content.toLowerCase();
 
-        // 1️⃣ 完整查詢匹配：標題 > 內文
+        // 1. 完整查詢匹配
         if (originalQuery != null && !originalQuery.isEmpty()) {
             String q = originalQuery.trim();
             if (!q.isEmpty()) {
@@ -151,7 +87,7 @@ public class RankCalculator {
             }
         }
 
-        // 2️⃣ 專有名詞匹配：活動場地 / 校名 / 地標
+        // 2. 專有名詞匹配
         int properNounMatches = 0;
         for (String noun : properNouns) {
             String n = noun.toLowerCase();
@@ -163,30 +99,24 @@ public class RankCalculator {
                 properNounMatches++;
             }
         }
-        // 有指定專有名詞但完全沒對到 → 懲罰
         if (!properNouns.isEmpty() && properNounMatches == 0) {
             score -= 20;
         }
 
-        // 🚨 2.5 海外內容懲罰 (New!)
-        // 如果標題或內文出現海外關鍵字，且沒有「台灣/台北」等解藥，就重扣分
+        // 2.5 海外內容懲罰
         boolean isForeign = false;
-        for (String fk : FOREIGN_PENALTY_KEYWORDS) {
+        for (String fk : FOREIGN_KEYWORDS_CORE) {
             if (titleLower.contains(fk) || contentLower.contains(fk)) {
                 isForeign = true;
                 break;
             }
         }
-        if (isForeign) {
-            boolean hasTaiwan = titleLower.contains("台灣") || titleLower.contains("台北") || titleLower.contains("taipei") ||
-                                contentLower.contains("台灣") || contentLower.contains("台北") || contentLower.contains("taipei");
-            if (!hasTaiwan) {
-                score -= 50; // 重扣 50 分
-                System.out.println("  ⚠️ 發現疑似海外內容扣分: " + title);
-            }
+        if (isForeign && !hasTaiwanLocation(title + " " + content)) {
+            score -= 50;
+            System.out.println("  ⚠️ 發現疑似海外內容扣分: " + title);
         }
 
-        // 3️⃣ 一般關鍵字匹配：標題 > 內文
+        // 3. 一般關鍵字匹配
         int normalMatches = 0;
         for (String token : normalTokens) {
             String t = token.toLowerCase();
@@ -199,75 +129,64 @@ public class RankCalculator {
             }
         }
 
-        // 4️⃣ 匹配比例加成（越多關鍵字命中，加成越高）
+        // 4. 匹配比例加成
         int totalTokens = properNouns.size() + normalTokens.size();
         int totalMatches = properNounMatches + normalMatches;
         if (totalTokens > 0) {
-            double matchRatio = (double) totalMatches / totalTokens; // 0 ~ 1
-            score *= (1.0 + matchRatio); // 最多多 100%
+            double matchRatio = (double) totalMatches / totalTokens;
+            score *= (1.0 + matchRatio);
         }
 
-        // 5️⃣ 日期新鮮度：未來加分、過期扣分 + 查詢時間範圍加成
+        // 5. 日期新鮮度
         LocalDate d = p.getEventDate();
         if (d != null) {
             long days = ChronoUnit.DAYS.between(today, d);
-            
-            // 基本時間分數
             if (days >= 0 && days <= 60) {
-                score += 12;            // 兩個月內活動強力加分
+                score += 12;
             } else if (days > 60) {
-                score += 4;             // 未來但較遠一點
-            } else { // 已經過期
-                score -= 18;            // 過期活動明顯扣分
+                score += 4;
+            } else {
+                score -= 18;
             }
             
-            // 查詢時間範圍額外加成
             if (originalQuery != null) {
                 QueryUnderstanding.DateRange queryDateRange = QueryUnderstanding.getDateRange(originalQuery);
                 if (queryDateRange != null && queryDateRange.contains(d)) {
-                    score += 25;        // 符合查詢時間範圍大加分
+                    score += 25;
                 }
             }
         }
 
-        // 6️⃣ 內容品質：字數太少的頁面扣一點分
+        // 6. 內容品質
         int length = content.length();
         if (length < 300) {
-            score *= 0.8;               // 內容太短，可信度低
+            score *= 0.8;
         } else if (length > 2000) {
-            score *= 1.05;              // 內容完整稍微加分
+            score *= 1.05;
         }
 
-        // 7️⃣ 來源：大部分網站一律 1.0，只給文化觀光 gov.tw 一點點加成
+        // 7. 來源權重
         String domain = p.getDomain() != null ? p.getDomain().toLowerCase() : "";
-        double sourceMultiplier = calculateSourceMultiplier(domain);
-        score *= sourceMultiplier;
+        score *= calculateSourceMultiplier(domain);
 
-        // 8️⃣ 申請 / 辦法類頁面懲罰（用 title + URL 判斷）
-        double contentMultiplier = calculateContentMultiplier(title, p.getUrl());
-        score *= contentMultiplier;
+        // 8. 申請/辦法類懲罰
+        score *= calculateContentMultiplier(title, p.getUrl());
 
-        // 9️⃣ 活動類型加成（只取第一個命中的）
-        for (Map.Entry<String, Double> entry : EVENT_TYPE_BOOST.entrySet()) {
+        // 9. 活動類型加成
+        for (var entry : EVENT_TYPE_BOOST.entrySet()) {
             if (titleLower.contains(entry.getKey().toLowerCase())) {
                 score *= entry.getValue();
                 break;
             }
         }
 
-        // 🔟 城市匹配 v6.0：降低城市權重差異（因為 SearchEngine 已經做了城市過濾）
-        // 此處的 userCity 實際上是 effectiveCity（查詢城市優先）
+        // 10. 城市匹配
         String userCity = (user != null) ? user.getUserCity() : null;
         String pageCity = p.getCity();
-
-        if (userCity != null && pageCity != null && !pageCity.isEmpty()
-                && !"全台".equals(pageCity)) {
-
+        if (userCity != null && pageCity != null && !pageCity.isEmpty() && !"全台".equals(pageCity)) {
             if (pageCity.equals(userCity)) {
-                // 同城市：輕微加分（前面已過濾，這裡只做微調）
                 score *= 1.2;
             } else {
-                // 不同城市：輕微降分（可能是內文提到目標城市的全台活動）
                 score *= 0.8;
             }
         }
@@ -275,33 +194,19 @@ public class RankCalculator {
         return Math.max(0.1, score);
     }
 
-    /**
-     * 來源加權：
-     * - 預設 1.0（大部分網站平等）
-     * - 文化 / 觀光相關的政府網站：1.1（資訊較準確）
-     */
     private static double calculateSourceMultiplier(String domain) {
         if (domain == null || domain.isEmpty()) return 1.0;
-        String d = domain.toLowerCase();
-
-        if (d.endsWith(".gov.tw")) {
-            if (d.contains("culture") || d.contains("moc") || d.contains("tourism")) {
-                return 1.1;   // 文化 / 觀光單位官網
+        if (domain.endsWith(".gov.tw")) {
+            if (domain.contains("culture") || domain.contains("moc") || domain.contains("tourism")) {
+                return 1.1;
             }
-            return 1.0;
         }
-
-        // 其他一律平等
         return 1.0;
     }
 
-    /**
-     * 申請 / 辦法類頁面懲罰
-     */
     private static double calculateContentMultiplier(String title, String url) {
         String t = title != null ? title.toLowerCase() : "";
         String u = url != null ? url.toLowerCase() : "";
-
         for (String keyword : APPLICATION_KEYWORDS) {
             if (t.contains(keyword) || u.contains(keyword)) {
                 return APPLICATION_PENALTY;
@@ -310,20 +215,10 @@ public class RankCalculator {
         return 1.0;
     }
 
-    /**
-     * 將分數標準化到 10~100 之間，方便前端顯示
-     */
     private static void normalizeScores(List<PageNode> pages) {
         if (pages.isEmpty()) return;
-
-        double maxScore = pages.stream()
-            .mapToDouble(PageNode::getTotalScore)
-            .max().orElse(1.0);
-
-        double minScore = pages.stream()
-            .mapToDouble(PageNode::getTotalScore)
-            .min().orElse(0.0);
-
+        double maxScore = pages.stream().mapToDouble(PageNode::getTotalScore).max().orElse(1.0);
+        double minScore = pages.stream().mapToDouble(PageNode::getTotalScore).min().orElse(0.0);
         double range = maxScore - minScore;
         if (range < 0.001) range = 1.0;
 
