@@ -4,8 +4,10 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -120,6 +122,9 @@ public class SearchEngine {
         TFIDFCalculator.applyTFIDFScores(pages, query);
         EventInfoExtractor.applyCompletenessBonus(pages); // 這裡會智慧判斷日期
         pages = Deduplicator.deduplicate(pages);
+        
+        // 7.5 ★ 子網頁提升：如果子網頁更相關，直接把它提升為主結果
+        pages = promoteRelevantSubPages(pages, queryTokens, today);
 
         // 8. 最終排名 (大審判)
         // RankCalculator v7.1 會執行：過期處決、垃圾降權、權威加分
@@ -291,6 +296,149 @@ public class SearchEngine {
         return d.contains("instagram.com") || d.contains("facebook.com") || 
                d.contains("threads.net") || d.contains("fb.com") ||
                d.contains("fb.watch");
+    }
+    
+    /**
+     * ★ 子網頁提升邏輯
+     * 如果子網頁標題/內容更符合查詢，把它提升為獨立結果
+     */
+    private static List<PageNode> promoteRelevantSubPages(List<PageNode> pages, 
+                                                          List<String> queryTokens,
+                                                          LocalDate today) {
+        List<PageNode> result = new ArrayList<>();
+        Set<String> seenUrls = new HashSet<>();
+        
+        for (PageNode parent : pages) {
+            List<SubPageNode> subPages = parent.getSubPages();
+            
+            // 找出最相關的子網頁
+            SubPageNode bestSub = null;
+            double bestSubScore = 0;
+            
+            for (SubPageNode sub : subPages) {
+                // 計算子網頁與查詢的相關度
+                double relevance = calculateSubPageRelevance(sub, queryTokens);
+                if (relevance > bestSubScore) {
+                    bestSubScore = relevance;
+                    bestSub = sub;
+                }
+            }
+            
+            // 判斷是否要提升子網頁
+            // 條件：子網頁相關度 > 閾值，且標題包含查詢關鍵字
+            boolean shouldPromote = bestSub != null && 
+                                   bestSubScore >= 3.0 &&
+                                   containsQueryTerms(bestSub.getTitle(), queryTokens);
+            
+            if (shouldPromote && !seenUrls.contains(bestSub.getUrl())) {
+                // 把子網頁轉換為 PageNode
+                PageNode promoted = convertSubToPage(bestSub, parent, queryTokens, today);
+                if (promoted != null) {
+                    // 繼承父網頁的部分分數
+                    promoted.setScore(parent.getScore() * 0.8 + bestSubScore);
+                    result.add(promoted);
+                    seenUrls.add(promoted.getUrl());
+                    System.out.println("[Promote] 提升子網頁: " + truncate(bestSub.getTitle(), 40));
+                }
+            }
+            
+            // 保留原始父網頁（如果還沒被加入）
+            if (!seenUrls.contains(parent.getUrl())) {
+                result.add(parent);
+                seenUrls.add(parent.getUrl());
+            }
+        }
+        
+        return result;
+    }
+    
+    /**
+     * 計算子網頁與查詢的相關度
+     */
+    private static double calculateSubPageRelevance(SubPageNode sub, List<String> queryTokens) {
+        if (sub == null || queryTokens == null) return 0;
+        
+        String title = sub.getTitle() != null ? sub.getTitle().toLowerCase() : "";
+        String content = sub.getTextContent() != null ? sub.getTextContent().toLowerCase() : "";
+        String combined = title + " " + content;
+        
+        double score = 0;
+        int matchCount = 0;
+        
+        for (String token : queryTokens) {
+            String t = token.toLowerCase();
+            if (title.contains(t)) {
+                score += 3.0;  // 標題匹配權重高
+                matchCount++;
+            } else if (content.contains(t)) {
+                score += 1.0;  // 內容匹配
+                matchCount++;
+            }
+        }
+        
+        // 如果所有關鍵字都匹配，額外加分
+        if (matchCount == queryTokens.size() && queryTokens.size() > 1) {
+            score += 2.0;
+        }
+        
+        // URL 包含關鍵字也加分
+        String url = sub.getUrl() != null ? sub.getUrl().toLowerCase() : "";
+        for (String token : queryTokens) {
+            if (url.contains(token.toLowerCase())) {
+                score += 1.0;
+            }
+        }
+        
+        return score;
+    }
+    
+    /**
+     * 檢查標題是否包含查詢關鍵字
+     */
+    private static boolean containsQueryTerms(String title, List<String> queryTokens) {
+        if (title == null || queryTokens == null || queryTokens.isEmpty()) return false;
+        String lower = title.toLowerCase();
+        
+        int matchCount = 0;
+        for (String token : queryTokens) {
+            if (lower.contains(token.toLowerCase())) {
+                matchCount++;
+            }
+        }
+        
+        // 至少匹配一半的關鍵字
+        return matchCount >= Math.max(1, queryTokens.size() / 2);
+    }
+    
+    /**
+     * 將 SubPageNode 轉換為 PageNode
+     */
+    private static PageNode convertSubToPage(SubPageNode sub, PageNode parent, 
+                                             List<String> queryTokens, LocalDate today) {
+        if (sub == null) return null;
+        
+        // 從子網頁標題/內容提取日期
+        String combined = sub.getTitle() + " " + sub.getTextContent();
+        LocalDate eventDate = parseDate(combined, today);
+        
+        // 提取城市
+        String city = extractCity(combined);
+        if (city == null) city = parent.getCity();
+        
+        // 建立新的 PageNode
+        PageNode promoted = PageNode.of(
+            sub.getUrl(),
+            sub.getTitle(),
+            new HashMap<>(),
+            eventDate,
+            city,
+            sub.getDomain(),
+            new ArrayList<>(queryTokens),
+            sub.getTextContent()
+        );
+        
+        promoted.setCrawled(true);
+        return promoted;
     }
 
     private static LocalDate extractDateFromTitle(String title, LocalDate today) {
