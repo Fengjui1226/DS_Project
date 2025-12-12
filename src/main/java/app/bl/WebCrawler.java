@@ -277,6 +277,15 @@ public class WebCrawler {
                 result.setTextContent(extractSmartContent(html)); 
                 result.setLinks(extractLinks(html, url));
                 
+                // ★ 新增：嘗試解析活動列表
+                if (isEventListPage(url, html)) {
+                    List<EventItem> eventItems = extractEventItems(html, url);
+                    result.setEventItems(eventItems);
+                    if (!eventItems.isEmpty()) {
+                        System.out.println("[WebCrawler] 發現活動列表頁，提取 " + eventItems.size() + " 個活動");
+                    }
+                }
+                
                 return result;
                 
             } catch (Exception e) {
@@ -409,9 +418,365 @@ public class WebCrawler {
         return text.replaceAll("\\s+", " ").trim();
     }
     
-    // ============ 內部類別 (保持不變) ============
-    // (為了節省篇幅，CrawlResult 和 SiteResult 結構保持原樣，請直接使用您原本的定義)
-    // 這裡只需要確保上面的 crawlWithRetry 方法被替換即可
+    /**
+     * 判斷是否為活動列表頁
+     */
+    private static boolean isEventListPage(String url, String html) {
+        if (url == null) return false;
+        String lower = url.toLowerCase();
+        
+        // URL 特徵判斷
+        boolean urlMatch = 
+            lower.contains("category") ||
+            lower.contains("list") ||
+            lower.contains("search") ||
+            lower.contains("type=") ||
+            lower.contains("演唱會") ||
+            lower.contains("展覽") ||
+            lower.contains("活動") ||
+            lower.contains("concert") ||
+            lower.contains("events") ||
+            (lower.contains("ticket") && lower.contains(".aspx"));
+        
+        // 內容特徵判斷：包含多個活動項目
+        if (html != null) {
+            // 計算活動相關連結數量
+            int eventLinkCount = 0;
+            Pattern p = Pattern.compile("href=[\"'][^\"']*(?:event|activity|show|UTK)[^\"']*[\"']", Pattern.CASE_INSENSITIVE);
+            Matcher m = p.matcher(html);
+            while (m.find()) eventLinkCount++;
+            
+            if (eventLinkCount >= 3) return true;
+        }
+        
+        return urlMatch;
+    }
+    
+    /**
+     * ★ 解析活動列表頁，提取每個活動項目
+     * 適用於 ticket.com.tw, accupass, kktix 等售票網站的列表頁
+     */
+    public static List<EventItem> extractEventItems(String html, String baseUrl) {
+        List<EventItem> items = new ArrayList<>();
+        if (html == null || html.isEmpty()) return items;
+        
+        String domain = extractDomain(baseUrl).toLowerCase();
+        
+        // 根據不同網站使用不同的解析策略
+        if (domain.contains("ticket.com.tw") || domain.contains("era.com")) {
+            items = parseTicketComTw(html, baseUrl);
+        } else if (domain.contains("accupass")) {
+            items = parseAccupass(html, baseUrl);
+        } else if (domain.contains("kktix")) {
+            items = parseKktix(html, baseUrl);
+        } else if (domain.contains("opentix")) {
+            items = parseOpentix(html, baseUrl);
+        } else if (domain.contains("tixcraft")) {
+            items = parseTixcraft(html, baseUrl);
+        } else {
+            // 通用解析：找所有包含活動資訊的連結
+            items = parseGenericEventList(html, baseUrl);
+        }
+        
+        return items;
+    }
+    
+    /**
+     * 年代售票 ticket.com.tw 解析
+     */
+    private static List<EventItem> parseTicketComTw(String html, String baseUrl) {
+        List<EventItem> items = new ArrayList<>();
+        
+        // 年代售票的活動項目通常在 <a> 標籤裡，包含活動圖片和標題
+        // 格式: <a href="..."><img alt="活動名稱">...</a>
+        // 或者: <div class="event">...<a href="...">活動名稱</a>...</div>
+        
+        // 方法1: 找包含日期的連結
+        Pattern p1 = Pattern.compile(
+            "<a[^>]+href=[\"']([^\"']*(?:UTK|event|activity|show)[^\"']*)[\"'][^>]*>.*?" +
+            "(?:<img[^>]+alt=[\"']([^\"']+)[\"']|([^<]{5,50}))" +
+            ".*?</a>",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL
+        );
+        
+        // 方法2: 找活動卡片區塊
+        Pattern cardPattern = Pattern.compile(
+            "(?:<div[^>]*class=[\"'][^\"']*(?:event|item|card|product)[^\"']*[\"'][^>]*>)" +
+            "(.*?)" +
+            "(?:</div>)",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL
+        );
+        
+        Matcher cardMatcher = cardPattern.matcher(html);
+        while (cardMatcher.find() && items.size() < 20) {
+            String card = cardMatcher.group(1);
+            
+            // 從卡片中提取連結
+            Pattern linkPattern = Pattern.compile("<a[^>]+href=[\"']([^\"']+)[\"'][^>]*>", Pattern.CASE_INSENSITIVE);
+            Matcher linkMatcher = linkPattern.matcher(card);
+            String url = linkMatcher.find() ? resolveUrl(linkMatcher.group(1), baseUrl) : null;
+            
+            // 從卡片中提取標題
+            String title = extractTitleFromCard(card);
+            
+            // 從卡片中提取日期
+            String date = extractDateFromCard(card);
+            
+            if (url != null && title != null && !title.isEmpty() && title.length() > 3) {
+                items.add(new EventItem(title, url, date, ""));
+            }
+        }
+        
+        // 如果上面沒找到，用更寬鬆的方式
+        if (items.isEmpty()) {
+            Pattern imgLinkPattern = Pattern.compile(
+                "<a[^>]+href=[\"']([^\"']+)[\"'][^>]*>\\s*<img[^>]+alt=[\"']([^\"']+)[\"']",
+                Pattern.CASE_INSENSITIVE
+            );
+            Matcher m = imgLinkPattern.matcher(html);
+            while (m.find() && items.size() < 20) {
+                String url = resolveUrl(m.group(1), baseUrl);
+                String title = cleanText(m.group(2));
+                if (url != null && !title.isEmpty() && title.length() > 3 && 
+                    !title.toLowerCase().contains("logo") && !title.toLowerCase().contains("banner")) {
+                    items.add(new EventItem(title, url, "", ""));
+                }
+            }
+        }
+        
+        return items;
+    }
+    
+    /**
+     * Accupass 解析
+     */
+    private static List<EventItem> parseAccupass(String html, String baseUrl) {
+        List<EventItem> items = new ArrayList<>();
+        
+        // Accupass 活動連結格式: /event/xxxxx
+        Pattern p = Pattern.compile(
+            "<a[^>]+href=[\"']([^\"']*?/event/[^\"']+)[\"'][^>]*>.*?" +
+            "(?:<[^>]*>)*([^<]{5,100})",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL
+        );
+        
+        Matcher m = p.matcher(html);
+        Set<String> seen = new HashSet<>();
+        
+        while (m.find() && items.size() < 20) {
+            String url = resolveUrl(m.group(1), baseUrl);
+            String title = cleanText(m.group(2).replaceAll("<[^>]+>", ""));
+            
+            if (url != null && !seen.contains(url) && !title.isEmpty() && title.length() > 3) {
+                seen.add(url);
+                items.add(new EventItem(title, url, "", ""));
+            }
+        }
+        
+        return items;
+    }
+    
+    /**
+     * KKTIX 解析
+     */
+    private static List<EventItem> parseKktix(String html, String baseUrl) {
+        List<EventItem> items = new ArrayList<>();
+        
+        // KKTIX 活動連結格式: /events/xxxxx 或 kktix.com/events/xxx
+        Pattern p = Pattern.compile(
+            "<a[^>]+href=[\"']([^\"']*?/events?/[^\"']+)[\"'][^>]*>",
+            Pattern.CASE_INSENSITIVE
+        );
+        
+        Matcher m = p.matcher(html);
+        Set<String> seen = new HashSet<>();
+        
+        while (m.find() && items.size() < 20) {
+            String url = resolveUrl(m.group(1), baseUrl);
+            if (url != null && !seen.contains(url)) {
+                seen.add(url);
+                // 嘗試從附近提取標題
+                int pos = m.end();
+                String nearby = html.substring(pos, Math.min(pos + 200, html.length()));
+                String title = extractFirstText(nearby);
+                if (!title.isEmpty()) {
+                    items.add(new EventItem(title, url, "", ""));
+                }
+            }
+        }
+        
+        return items;
+    }
+    
+    /**
+     * Opentix 解析
+     */
+    private static List<EventItem> parseOpentix(String html, String baseUrl) {
+        List<EventItem> items = new ArrayList<>();
+        
+        Pattern p = Pattern.compile(
+            "<a[^>]+href=[\"']([^\"']*?/event(?:s)?/[^\"']+)[\"'][^>]*>",
+            Pattern.CASE_INSENSITIVE
+        );
+        
+        Matcher m = p.matcher(html);
+        Set<String> seen = new HashSet<>();
+        
+        while (m.find() && items.size() < 20) {
+            String url = resolveUrl(m.group(1), baseUrl);
+            if (url != null && !seen.contains(url)) {
+                seen.add(url);
+                int pos = m.end();
+                String nearby = html.substring(pos, Math.min(pos + 200, html.length()));
+                String title = extractFirstText(nearby);
+                if (!title.isEmpty()) {
+                    items.add(new EventItem(title, url, "", ""));
+                }
+            }
+        }
+        
+        return items;
+    }
+    
+    /**
+     * Tixcraft 解析
+     */
+    private static List<EventItem> parseTixcraft(String html, String baseUrl) {
+        List<EventItem> items = new ArrayList<>();
+        
+        Pattern p = Pattern.compile(
+            "<a[^>]+href=[\"']([^\"']*?/activity/detail/[^\"']+)[\"'][^>]*>",
+            Pattern.CASE_INSENSITIVE
+        );
+        
+        Matcher m = p.matcher(html);
+        Set<String> seen = new HashSet<>();
+        
+        while (m.find() && items.size() < 20) {
+            String url = resolveUrl(m.group(1), baseUrl);
+            if (url != null && !seen.contains(url)) {
+                seen.add(url);
+                int pos = m.end();
+                String nearby = html.substring(pos, Math.min(pos + 200, html.length()));
+                String title = extractFirstText(nearby);
+                if (!title.isEmpty()) {
+                    items.add(new EventItem(title, url, "", ""));
+                }
+            }
+        }
+        
+        return items;
+    }
+    
+    /**
+     * 通用活動列表解析
+     */
+    private static List<EventItem> parseGenericEventList(String html, String baseUrl) {
+        List<EventItem> items = new ArrayList<>();
+        
+        // 找所有可能是活動的連結（包含 event, activity, show, concert 等關鍵字）
+        Pattern p = Pattern.compile(
+            "<a[^>]+href=[\"']([^\"']*?(?:event|activity|show|concert|ticket|演唱|展覽|活動)[^\"']*)[\"'][^>]*>" +
+            "([^<]*(?:<[^>]+>[^<]*)*)</a>",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL
+        );
+        
+        Matcher m = p.matcher(html);
+        Set<String> seen = new HashSet<>();
+        
+        while (m.find() && items.size() < 20) {
+            String url = resolveUrl(m.group(1), baseUrl);
+            String content = m.group(2).replaceAll("<[^>]+>", " ").trim();
+            String title = cleanText(content);
+            
+            if (url != null && !seen.contains(url) && !title.isEmpty() && 
+                title.length() > 5 && title.length() < 100) {
+                seen.add(url);
+                items.add(new EventItem(title, url, "", ""));
+            }
+        }
+        
+        return items;
+    }
+    
+    /**
+     * 從卡片 HTML 提取標題
+     */
+    private static String extractTitleFromCard(String card) {
+        // 優先從 <h1>-<h6> 提取
+        Pattern hPattern = Pattern.compile("<h[1-6][^>]*>([^<]+)</h[1-6]>", Pattern.CASE_INSENSITIVE);
+        Matcher hm = hPattern.matcher(card);
+        if (hm.find()) return cleanText(hm.group(1));
+        
+        // 從 img alt 提取
+        Pattern imgPattern = Pattern.compile("<img[^>]+alt=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE);
+        Matcher im = imgPattern.matcher(card);
+        if (im.find()) return cleanText(im.group(1));
+        
+        // 從 title 屬性提取
+        Pattern titlePattern = Pattern.compile("title=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE);
+        Matcher tm = titlePattern.matcher(card);
+        if (tm.find()) return cleanText(tm.group(1));
+        
+        // 從第一段文字提取
+        return extractFirstText(card);
+    }
+    
+    /**
+     * 從卡片 HTML 提取日期
+     */
+    private static String extractDateFromCard(String card) {
+        // 常見日期格式
+        Pattern datePattern = Pattern.compile(
+            "(\\d{4}[/\\-.]\\d{1,2}[/\\-.]\\d{1,2})" +  // 2025/01/17
+            "|(\\d{1,2}[/\\-.]\\d{1,2})" +               // 01/17
+            "|(\\d{1,2}月\\d{1,2}日?)",                   // 1月17日
+            Pattern.CASE_INSENSITIVE
+        );
+        Matcher m = datePattern.matcher(card);
+        if (m.find()) {
+            return m.group();
+        }
+        return "";
+    }
+    
+    /**
+     * 提取第一段有意義的文字
+     */
+    private static String extractFirstText(String html) {
+        String text = html.replaceAll("<[^>]+>", " ").replaceAll("\\s+", " ").trim();
+        // 取前 100 字元
+        if (text.length() > 100) {
+            text = text.substring(0, 100);
+            int lastSpace = text.lastIndexOf(' ');
+            if (lastSpace > 50) text = text.substring(0, lastSpace);
+        }
+        return text;
+    }
+    
+    // ============ 內部類別 ============
+    
+    /**
+     * 活動項目（從列表頁提取）
+     */
+    public static class EventItem {
+        public final String title;
+        public final String url;
+        public final String date;
+        public final String snippet;
+        
+        public EventItem(String title, String url, String date, String snippet) {
+            this.title = title != null ? title : "";
+            this.url = url != null ? url : "";
+            this.date = date != null ? date : "";
+            this.snippet = snippet != null ? snippet : "";
+        }
+        
+        @Override
+        public String toString() {
+            return title + " | " + date + " -> " + url;
+        }
+    }
     
     public static class CrawlResult {
         private final String url;
@@ -419,6 +784,7 @@ public class WebCrawler {
         private String textContent = "";
         private String html = "";
         private List<String> links = new ArrayList<>();
+        private List<EventItem> eventItems = new ArrayList<>();  // ★ 新增：活動項目列表
         private boolean success = false;
         private String error = null;
         public CrawlResult(String url) { this.url = url; }
@@ -431,13 +797,15 @@ public class WebCrawler {
         public void setHtml(String html) { this.html = html != null ? html : ""; }
         public List<String> getLinks() { return links; }
         public void setLinks(List<String> links) { this.links = links != null ? links : new ArrayList<>(); }
+        public List<EventItem> getEventItems() { return eventItems; }
+        public void setEventItems(List<EventItem> items) { this.eventItems = items != null ? items : new ArrayList<>(); }
         public boolean isSuccess() { return success; }
         public void setSuccess(boolean success) { this.success = success; }
         public void setError(String error) { this.error = error; this.success = false; }
         public String getError() { return error; }
     }
     
-    public static class SiteResult { // 保持原樣
+    public static class SiteResult {
         private final String url;
         public SiteResult(String url) { this.url = url; }
         public void setMainPage(CrawlResult r) {}

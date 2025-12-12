@@ -107,17 +107,40 @@ public class RankCalculator {
             multiplier *= M_INFO_RICH;
         }
 
-        // 2. 標題年份檢查 (針對沒有 eventDate 的頁面)
-        int currentYear = today.getYear(); 
-        Pattern yearPattern = Pattern.compile("20[12][0-9]");
-        Matcher m = yearPattern.matcher(title);
-        while (m.find()) {
-            int titleYear = Integer.parseInt(m.group());
-            if (titleYear < currentYear) {
-                boolean mentionsFuture = title.contains(String.valueOf(currentYear)) || 
-                                         title.contains(String.valueOf(currentYear + 1));
-                if (!mentionsFuture) return M_EXPIRED_PENALTY;
+        // 2. 標題/內容年份檢查 (針對沒有 eventDate 的頁面)
+        int currentYear = today.getYear();
+        String content = p.getTextContent() != null ? p.getTextContent() : "";
+        String combined = title + " " + content;
+        
+        // ★ 新增：檢查文章更新日期（如 "2022/11/16更新"）
+        Pattern updateDatePattern = Pattern.compile("(20[1-2][0-9])[/\\-](\\d{1,2})[/\\-](\\d{1,2})(?:更新|發布|編輯|發佈)");
+        Matcher updateMatcher = updateDatePattern.matcher(combined);
+        if (updateMatcher.find()) {
+            int updateYear = Integer.parseInt(updateMatcher.group(1));
+            // 如果更新日期是去年或更早，很可能是舊文章
+            if (updateYear < currentYear - 1) {
+                return M_EXPIRED_PENALTY;
             }
+        }
+        
+        // 檢查是否有過期年份標記（如「2024全台」「2023精選」）
+        Pattern oldYearPattern = Pattern.compile("(20[1-2][0-9])(?:年|全台|精選|最新|活動|整理|市集|展覽|聖誕|跨年)");
+        Matcher m = oldYearPattern.matcher(combined);
+        boolean hasOldYear = false;
+        boolean hasFutureYear = false;
+        
+        while (m.find()) {
+            int foundYear = Integer.parseInt(m.group(1));
+            if (foundYear < currentYear) {
+                hasOldYear = true;
+            } else if (foundYear >= currentYear) {
+                hasFutureYear = true;
+            }
+        }
+        
+        // 如果有舊年份且沒有新年份，判定為過期
+        if (hasOldYear && !hasFutureYear) {
+            return M_EXPIRED_PENALTY;
         }
 
         // 3. 垃圾內容過濾 (使用 Constants 中的黑名單)

@@ -31,7 +31,7 @@ public class SearchEngine {
 
     // ★ 參數設定
     private static final int MAX_GOOGLE_RESULTS = 20;   // 抓 20 筆，節省 API (10筆=1次呼叫)
-    private static final int MAX_DEEP_CRAWL_COUNT = 12; // 只爬前 12 筆，加速回應
+    private static final int MAX_DEEP_CRAWL_COUNT = 20; // 只爬前 12 筆，加速回應
     private static final boolean ENABLE_CRAWLING = true;
     private static final int SEARCH_TIMEOUT_MS = 20000; // 20秒超時
     private static final int CRAWL_PARALLEL_LIMIT = 15; // 並發數
@@ -156,13 +156,24 @@ public class SearchEngine {
     }
 
     /**
-     * 寬鬆版 Query Refinement：不加負向關鍵字，只加正向引導
+     * Query Refinement v2.0：加入年份過濾，專注找未來活動
      */
     private static String refineQuery(String query) {
         String q = (query == null) ? "" : query.trim();
         if (q.isEmpty()) return q;
         StringBuilder sb = new StringBuilder(q);
         String lower = q.toLowerCase();
+        
+        // 取得當前年份和明年
+        int currentYear = LocalDate.now().getYear();
+        int nextYear = currentYear + 1;
+
+        // ★ 核心改進：如果查詢沒有年份，加上年份限制
+        boolean hasYear = lower.matches(".*20[2-3][0-9].*");
+        if (!hasYear) {
+            // 加上當年或明年的關鍵字，確保找到的是近期/未來活動
+            sb.append(" (").append(currentYear).append(" OR ").append(nextYear).append(")");
+        }
 
         // 增加召回率：如果沒有明確活動詞，幫他補上
         boolean hasEventWord = EVENT_TERMS.stream().anyMatch(t -> lower.contains(t.toLowerCase()));
@@ -263,7 +274,6 @@ public class SearchEngine {
             // 嘗試提取日期與城市
             if (page.getEventDate() == null) {
                 String combined = (crawledTitle != null ? crawledTitle + " " : "") + (content != null ? content : "");
-                // 使用 EventInfoExtractor 進行智慧提取 (雖然這裡為了簡化沒直接呼叫，但原理相同)
                 LocalDate d = extractDateFromContent(combined, today);
                 if (d != null) page.setEventDate(d);
             }
@@ -272,6 +282,24 @@ public class SearchEngine {
                 String combined = (crawledTitle != null ? crawledTitle + " " : "") + content;
                 String city = extractCity(combined);
                 if (city != null) page.setCity(city);
+            }
+            
+            // ★ 新增：處理活動列表頁的項目
+            List<WebCrawler.EventItem> eventItems = result.getEventItems();
+            if (eventItems != null && !eventItems.isEmpty()) {
+                // 把活動項目轉為子網頁（會在後續被提升）
+                for (WebCrawler.EventItem item : eventItems) {
+                    if (isRelevantToQuery(item.title, queryTokens)) {
+                        SubPageNode sub = new SubPageNode(
+                            item.url, 
+                            item.title, 
+                            item.date + " " + item.snippet, 
+                            page.getUrl()
+                        );
+                        sub.setScore(5.0);  // 給予較高的初始分數
+                        page.addSubPage(sub);
+                    }
+                }
             }
             
             // 爬取子連結
@@ -296,6 +324,24 @@ public class SearchEngine {
         return d.contains("instagram.com") || d.contains("facebook.com") || 
                d.contains("threads.net") || d.contains("fb.com") ||
                d.contains("fb.watch");
+    }
+    
+    /**
+     * 判斷活動項目是否與查詢相關
+     */
+    private static boolean isRelevantToQuery(String title, List<String> queryTokens) {
+        if (title == null || title.isEmpty() || queryTokens == null || queryTokens.isEmpty()) {
+            return false;
+        }
+        String lower = title.toLowerCase();
+        
+        // 至少匹配一個查詢關鍵字
+        for (String token : queryTokens) {
+            if (lower.contains(token.toLowerCase())) {
+                return true;
+            }
+        }
+        return false;
     }
     
     /**
@@ -505,12 +551,33 @@ public class SearchEngine {
                 int m = Integer.parseInt(m2.group(1));
                 int d = Integer.parseInt(m2.group(2));
                 
-                // 先檢查文中有沒有年份提示
+                // ★ 改進：尋找「活動相關」的年份，忽略「更新日期」等
                 int guessYear = currentYear;
-                Pattern anyYear = Pattern.compile("(20[2-3]\\d)");
-                Matcher ym2 = anyYear.matcher(text);
-                if (ym2.find()) {
-                    guessYear = Integer.parseInt(ym2.group(1));
+                
+                // 先找活動年份模式（如 "2025年活動"、"2025聖誕"）
+                Pattern eventYear = Pattern.compile("(20[2-3]\\d)(?:年)?(?:活動|市集|展覽|演唱|音樂|聖誕|跨年|春節)");
+                Matcher eym = eventYear.matcher(text);
+                if (eym.find()) {
+                    guessYear = Integer.parseInt(eym.group(1));
+                } else {
+                    // 沒有活動年份，檢查是否有舊年份的「更新」字樣
+                    Pattern oldUpdatePattern = Pattern.compile("(20[2-3]\\d)[/\\-](\\d{1,2})[/\\-](\\d{1,2})(?:更新|發布|編輯)");
+                    Matcher oldUpdate = oldUpdatePattern.matcher(text);
+                    boolean hasOldUpdate = oldUpdate.find() && Integer.parseInt(oldUpdate.group(1)) < currentYear;
+                    
+                    if (!hasOldUpdate) {
+                        // 沒有舊的更新日期，找任何年份
+                        Pattern anyYear = Pattern.compile("(20[2-3]\\d)");
+                        Matcher ym2 = anyYear.matcher(text);
+                        while (ym2.find()) {
+                            int foundYear = Integer.parseInt(ym2.group(1));
+                            // 只使用當年或未來年份
+                            if (foundYear >= currentYear) {
+                                guessYear = foundYear;
+                                break;
+                            }
+                        }
+                    }
                 }
                 
                 LocalDate date = LocalDate.of(guessYear, m, d);

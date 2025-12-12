@@ -16,11 +16,7 @@ import java.util.concurrent.Executors;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
-import app.bl.KeywordSuggester;
-import app.bl.PageNode;
-import app.bl.SearchEngine;
-import app.bl.SubPageNode;
-import app.bl.UserProfile;
+import app.bl.*;
 
 /**
  * SimpleServer v3.0 - 支援爬蟲 + 關鍵字推薦
