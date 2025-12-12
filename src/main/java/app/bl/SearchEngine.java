@@ -283,6 +283,12 @@ public class SearchEngine {
             }
         }
         
+        // 0.5 相對日期（今天、明天、這週末等）
+        LocalDate relativeDate = parseRelativeDate(text, today);
+        if (relativeDate != null) {
+            return relativeDate;
+        }
+        
         // 1. 完整日期格式 yyyy/MM/dd 或 yyyy-MM-dd 或 yyyy年M月d日
         Pattern p1 = Pattern.compile("(20[2-3]\\d)[/.\\-年](0?[1-9]|1[0-2])[/.\\-月](0?[1-9]|[12]\\d|3[01])");
         Matcher m1 = p1.matcher(text);
@@ -359,6 +365,74 @@ public class SearchEngine {
             .sorted(Collections.reverseOrder())
             .findFirst()
             .orElse(null);
+    }
+    
+    /**
+     * 解析相對日期（今天、明天、週末、星期X等）
+     */
+    private static LocalDate parseRelativeDate(String text, LocalDate today) {
+        if (text == null) return null;
+        
+        // 今天、明天、後天
+        if (text.contains("今天") || text.contains("今日")) {
+            return today;
+        }
+        if (text.contains("明天") || text.contains("明日")) {
+            return today.plusDays(1);
+        }
+        if (text.contains("後天")) {
+            return today.plusDays(2);
+        }
+        
+        // 這週末、本週末
+        if (text.contains("這週末") || text.contains("本週末") || text.contains("這個週末") || text.contains("本周末")) {
+            // 找到這週的星期六
+            int daysUntilSat = (java.time.DayOfWeek.SATURDAY.getValue() - today.getDayOfWeek().getValue() + 7) % 7;
+            if (daysUntilSat == 0 && today.getDayOfWeek() != java.time.DayOfWeek.SATURDAY) {
+                daysUntilSat = 7;
+            }
+            return today.plusDays(daysUntilSat);
+        }
+        
+        // 下週末
+        if (text.contains("下週末") || text.contains("下個週末") || text.contains("下周末")) {
+            int daysUntilSat = (java.time.DayOfWeek.SATURDAY.getValue() - today.getDayOfWeek().getValue() + 7) % 7;
+            return today.plusDays(daysUntilSat + 7);
+        }
+        
+        // 星期X / 週X / 禮拜X
+        String[] weekdayPatterns = {
+            "週一|周一|星期一|禮拜一",
+            "週二|周二|星期二|禮拜二", 
+            "週三|周三|星期三|禮拜三",
+            "週四|周四|星期四|禮拜四",
+            "週五|周五|星期五|禮拜五",
+            "週六|周六|星期六|禮拜六",
+            "週日|周日|星期日|星期天|禮拜日|禮拜天"
+        };
+        
+        for (int i = 0; i < weekdayPatterns.length; i++) {
+            Pattern p = Pattern.compile("(這|本|下)?" + "(" + weekdayPatterns[i] + ")");
+            Matcher m = p.matcher(text);
+            if (m.find()) {
+                int targetDayOfWeek = (i == 6) ? 7 : i + 1; // 1=週一, 7=週日
+                String prefix = m.group(1);
+                
+                int daysToAdd = targetDayOfWeek - today.getDayOfWeek().getValue();
+                if (daysToAdd <= 0) {
+                    daysToAdd += 7; // 如果已經過了，找下一週的
+                }
+                
+                // 如果有「下」字，再加一週
+                if ("下".equals(prefix)) {
+                    daysToAdd += 7;
+                }
+                
+                return today.plusDays(daysToAdd);
+            }
+        }
+        
+        return null;
     }
 
     private static String extractTitleFromUrl(String url) {
