@@ -163,10 +163,39 @@ public final class Constants {
         "accupass.com", "opentix.life", "tixcraft.com", "kktix.com",
         "indievox.com", "ticket.com.tw", "udnfunlife.com", "kham.com.tw",
         "ticket.ibon.com.tw", "famiport.com.tw",
-        // IG 懶人包媒體
+        // IG 懶人包媒體 (原有)
         "popdaily.com.tw", "elle.com", "vogue.com.tw", "marieclaire.com.tw", 
         "womenshealthmag.com", "gq.com.tw", "travel.yahoo.com.tw", 
-        "girlstalk.cc", "niusnews.com", "shoppingdesign.com.tw", "500times.udn.com"
+        "girlstalk.cc", "niusnews.com", "shoppingdesign.com.tw", "500times.udn.com",
+        // ★ 新增：時尚生活媒體
+        "harpersbazaar.com.tw",    // Harper's BAZAAR (搜尋結果很多)
+        "beautimode.com",          // BeautiMode
+        "styletc.com",             // 時尚圈
+        "wowlavie.com",            // LaVie 設計生活
+        "gvm.com.tw",              // 遠見雜誌
+        "businessweekly.com.tw",   // 商周 (搜尋結果有活動整理)
+        // ★ 新增：旅遊生活網站
+        "welcometw.com",           // 好好玩 (搜尋結果有)
+        "liviatravel.com",         // Livia's Wonderland
+        "momoblog.tw",             // 桃桃旅人手札 (搜尋結果有)
+        "walkerland.com.tw",       // 窩客島
+        "taipei-walker.com",       // 台北Walker
+        "travel.taipei",           // 台北旅遊網 (官方)
+        "eztravel.com.tw",         // 易遊網
+        // ★ 新增：美食生活
+        "supertaste.tvbs.com.tw",  // 食尚玩家 (搜尋結果有)
+        "ifoodie.tw",              // 愛食記
+        "zineblog.com.tw",         // Zine 生活誌
+        // ★ 新增：市集主辦單位
+        "gds.apothecary1969.com",  // 好日市集 (搜尋結果有)
+        "popupasia.com",           // Pop Up Asia
+        "simplemarket.tw",         // Simple Market
+        // ★ 新增：票務與活動平台
+        "tw.trip.com",             // Trip.com 台灣 (搜尋結果有)
+        "klook.com",               // Klook (搜尋結果有)
+        "kkday.com",               // KKday
+        // ★ 新增：創作平台
+        "vocus.cc"                 // 方格子 (搜尋結果有市集整理)
     );
 
     public static final Set<String> NOISE_KEYWORDS = Set.of(
@@ -242,12 +271,20 @@ public final class Constants {
         Map.entry("跨年", List.of("新年", "元旦"))
     );
 
+    // ★ 社群平台策略：不排除 IG/FB/Threads，改用 Google snippet 作為內容來源
+    // 即使爬蟲失敗，snippet 已經包含足夠資訊
     public static final Set<String> EXCLUDED_DOMAINS = Set.of(
-        "x.com", "twitter.com", "ptt.cc", "dcard.tw", 
-        "amazon.co.jp", "rakuten.co.jp", "yahoo.co.jp", 
-        "booking.com", "agoda.com", "trivago.com", "hotels.com",
-        "facebook.com", "instagram.com", 
-        "ndltd.ncl.edu.tw", "airitilibrary.com", "scholar.google.com.tw"
+        "x.com", "twitter.com",  // Twitter/X 仍排除（內容太碎）
+        "ptt.cc", "dcard.tw",    // 論壇討論，非活動資訊
+        "amazon.co.jp", "rakuten.co.jp", "yahoo.co.jp",  // 日本購物
+        "booking.com", "agoda.com", "trivago.com", "hotels.com",  // 訂房網站
+        "ndltd.ncl.edu.tw", "airitilibrary.com", "scholar.google.com.tw"  // 學術
+        // ★ 已移除：facebook.com, instagram.com（改由 snippet 提供內容）
+    );
+    
+    // ★ 新增：社群平台域名（爬蟲會失敗，但 snippet 可用）
+    public static final Set<String> SOCIAL_DOMAINS = Set.of(
+        "instagram.com", "facebook.com", "threads.net", "fb.com"
     );
 
     public static final Set<String> APPLICATION_KEYWORDS = Set.of(

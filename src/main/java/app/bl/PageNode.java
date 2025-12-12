@@ -42,6 +42,15 @@ public class PageNode {
     
     public static PageNode of(String url, String title, Map<Keyword, Integer> tf,
                               LocalDate date, String city, String domain, List<String> tokens) {
+        return of(url, title, tf, date, city, domain, tokens, null);
+    }
+    
+    /**
+     * 新增：支援傳入 Google snippet 作為初始內容
+     */
+    public static PageNode of(String url, String title, Map<Keyword, Integer> tf,
+                              LocalDate date, String city, String domain, List<String> tokens,
+                              String snippet) {
         PageNode p = new PageNode();
         p.url = url;
         p.title = title;
@@ -50,6 +59,8 @@ public class PageNode {
         p.city = normalizeCity(city);
         p.domain = domain;
         p.tokens = tokens != null ? tokens : new ArrayList<>();
+        // ★ 關鍵：將 snippet 作為初始內容，即使爬蟲失敗也有資料
+        p.textContent = snippet != null ? snippet : "";
         return p;
     }
 

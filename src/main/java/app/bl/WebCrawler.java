@@ -43,6 +43,9 @@ public class WebCrawler {
     
     // 更真實的 User-Agent
     private static final String CHROME_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+    
+    // IG 專用：模擬手機瀏覽器（IG 對手機版限制較少）
+    private static final String MOBILE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
 
     // 跳過的資源
     private static final Set<String> SKIP_EXTENSIONS = Set.of(
@@ -65,7 +68,159 @@ public class WebCrawler {
     );
 
     public static CrawlResult crawl(String url) {
+        // ★ IG 特殊處理
+        if (isInstagramUrl(url)) {
+            return crawlInstagram(url);
+        }
         return crawlWithRetry(url, 1);
+    }
+    
+    /**
+     * 判斷是否為 Instagram URL
+     */
+    private static boolean isInstagramUrl(String url) {
+        return url != null && (url.contains("instagram.com") || url.contains("instagr.am"));
+    }
+    
+    /**
+     * IG 專用爬蟲 - 嘗試從 meta tags 提取資訊
+     * 
+     * IG 頁面雖然主要靠 JS 渲染，但 meta tags (og:title, og:description) 
+     * 通常會包含貼文的基本資訊，這是不需要登入就能取得的。
+     */
+    private static CrawlResult crawlInstagram(String url) {
+        CrawlResult result = new CrawlResult(url);
+        
+        try {
+            // 使用手機版 User-Agent，IG 對手機版限制較少
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("User-Agent", MOBILE_UA)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Accept-Language", "zh-TW,zh;q=0.9,en;q=0.8")
+                .header("Sec-Fetch-Dest", "document")
+                .header("Sec-Fetch-Mode", "navigate")
+                .header("Sec-Fetch-Site", "none")
+                .timeout(Duration.ofSeconds(10))
+                .GET()
+                .build();
+            
+            HttpResponse<String> response = HTTP_CLIENT.send(request,
+                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            
+            int status = response.statusCode();
+            
+            // IG 可能回傳 302 重定向到登入頁
+            if (status == 302 || status == 301) {
+                result.setError("IG Redirect (需登入)");
+                return result;
+            }
+            
+            if (status != 200) {
+                result.setError("HTTP " + status);
+                return result;
+            }
+            
+            String html = response.body();
+            
+            // 檢查是否被重定向到登入頁
+            if (html.contains("loginForm") || html.contains("Login • Instagram")) {
+                result.setError("IG 需要登入");
+                return result;
+            }
+            
+            // 從 meta tags 提取資訊
+            String title = extractMetaContent(html, "og:title");
+            String description = extractMetaContent(html, "og:description");
+            String siteName = extractMetaContent(html, "og:site_name");
+            
+            // 嘗試從 JSON-LD 提取更多資訊
+            String jsonLdContent = extractJsonLdContent(html);
+            
+            // 組合內容
+            StringBuilder content = new StringBuilder();
+            if (title != null && !title.isEmpty()) {
+                content.append(title).append(" ");
+            }
+            if (description != null && !description.isEmpty()) {
+                content.append(description).append(" ");
+            }
+            if (jsonLdContent != null && !jsonLdContent.isEmpty()) {
+                content.append(jsonLdContent);
+            }
+            
+            String finalContent = content.toString().trim();
+            
+            if (finalContent.isEmpty()) {
+                result.setError("IG 無法提取內容");
+                return result;
+            }
+            
+            result.setSuccess(true);
+            result.setTitle(title != null ? title : "Instagram");
+            result.setTextContent(finalContent);
+            result.setHtml(html.length() > 50000 ? html.substring(0, 50000) : html);
+            
+            return result;
+            
+        } catch (Exception e) {
+            result.setError("IG Error: " + e.getClass().getSimpleName());
+            return result;
+        }
+    }
+    
+    /**
+     * 從 HTML 提取 meta tag 內容
+     */
+    private static String extractMetaContent(String html, String property) {
+        // 嘗試 property 格式: <meta property="og:title" content="...">
+        Pattern p1 = Pattern.compile(
+            "<meta[^>]+property=[\"']" + Pattern.quote(property) + "[\"'][^>]+content=[\"']([^\"']*)[\"']",
+            Pattern.CASE_INSENSITIVE
+        );
+        Matcher m1 = p1.matcher(html);
+        if (m1.find()) return cleanText(m1.group(1));
+        
+        // 嘗試反向格式: <meta content="..." property="og:title">
+        Pattern p2 = Pattern.compile(
+            "<meta[^>]+content=[\"']([^\"']*)[\"'][^>]+property=[\"']" + Pattern.quote(property) + "[\"']",
+            Pattern.CASE_INSENSITIVE
+        );
+        Matcher m2 = p2.matcher(html);
+        if (m2.find()) return cleanText(m2.group(1));
+        
+        // 嘗試 name 格式: <meta name="description" content="...">
+        Pattern p3 = Pattern.compile(
+            "<meta[^>]+name=[\"']" + Pattern.quote(property) + "[\"'][^>]+content=[\"']([^\"']*)[\"']",
+            Pattern.CASE_INSENSITIVE
+        );
+        Matcher m3 = p3.matcher(html);
+        if (m3.find()) return cleanText(m3.group(1));
+        
+        return null;
+    }
+    
+    /**
+     * 嘗試從 JSON-LD 結構化資料提取內容
+     */
+    private static String extractJsonLdContent(String html) {
+        Pattern p = Pattern.compile(
+            "<script[^>]+type=[\"']application/ld\\+json[\"'][^>]*>([^<]+)</script>",
+            Pattern.CASE_INSENSITIVE
+        );
+        Matcher m = p.matcher(html);
+        
+        StringBuilder content = new StringBuilder();
+        while (m.find()) {
+            String json = m.group(1);
+            // 簡單提取 "caption", "description", "name" 等欄位
+            Pattern fieldPattern = Pattern.compile("\"(caption|description|name|headline)\"\\s*:\\s*\"([^\"]+)\"");
+            Matcher fm = fieldPattern.matcher(json);
+            while (fm.find()) {
+                content.append(fm.group(2)).append(" ");
+            }
+        }
+        return content.toString().trim();
     }
     
     private static CrawlResult crawlWithRetry(String url, int maxRetries) {

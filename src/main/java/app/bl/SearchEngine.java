@@ -221,6 +221,27 @@ public class SearchEngine {
 
     private static void crawlPageFast(PageNode page, List<String> queryTokens, LocalDate today) {
         try {
+            String domain = page.getDomain();
+            
+            // ★ 社群平台策略：不深度爬取，直接用 Google snippet
+            if (isSocialDomain(domain)) {
+                page.setCrawled(true);  // 標記為已處理
+                // snippet 已在 createPageNode 時設為 textContent
+                // 只需要嘗試從 snippet 提取更多資訊
+                String content = page.getTextContent();
+                if (content != null && !content.isEmpty()) {
+                    if (page.getEventDate() == null) {
+                        LocalDate d = extractDateFromContent(content, today);
+                        if (d != null) page.setEventDate(d);
+                    }
+                    if (page.getCity() == null) {
+                        String city = extractCity(content);
+                        if (city != null) page.setCity(city);
+                    }
+                }
+                return;  // 不進行網路爬取
+            }
+            
             // 使用 WebCrawler v3.0 (偽裝成瀏覽器)
             WebCrawler.CrawlResult result = WebCrawler.crawl(page.getUrl());
             if (!result.isSuccess()) return;
@@ -259,6 +280,17 @@ public class SearchEngine {
                 }
             }
         } catch (Exception ignore) {}
+    }
+    
+    /**
+     * 判斷是否為社群平台（使用 snippet 策略，不深度爬取）
+     */
+    private static boolean isSocialDomain(String domain) {
+        if (domain == null) return false;
+        String d = domain.toLowerCase();
+        return d.contains("instagram.com") || d.contains("facebook.com") || 
+               d.contains("threads.net") || d.contains("fb.com") ||
+               d.contains("fb.watch");
     }
 
     private static LocalDate extractDateFromTitle(String title, LocalDate today) {
@@ -454,10 +486,25 @@ public class SearchEngine {
                                            LocalDate today) {
         if (shouldExclude(r.title, r.link)) return null;
         LocalDate eventDate = extractDateFromTitle(r.title, today);
+        
+        // ★ 也從 snippet 提取日期（Google snippet 通常包含活動時間）
+        if (eventDate == null && r.snippet != null) {
+            eventDate = parseDate(r.snippet, today);
+        }
+        
         Map<Keyword, Integer> tf = new HashMap<>();
         String city = extractCity(r.title);
+        
+        // 也從 snippet 提取城市
+        if (city == null && r.snippet != null) {
+            city = extractCity(r.snippet);
+        }
+        
         String domain = extractDomain(r.link);
-        return PageNode.of(r.link, r.title, tf, eventDate, city, domain, new ArrayList<>(queryTokens));
+        
+        // ★ 關鍵：傳入 snippet 作為初始內容
+        return PageNode.of(r.link, r.title, tf, eventDate, city, domain, 
+                          new ArrayList<>(queryTokens), r.snippet);
     }
 
     private static String extractDomain(String url) {

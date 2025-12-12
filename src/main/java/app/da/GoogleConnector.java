@@ -9,21 +9,27 @@ import java.util.*;
 import java.util.regex.*;
 
 /**
- * Google Custom Search 封裝
+ * Google Custom Search 封裝 v2.0
  * - 每次 API 只能拿 num <= 10
  * - 這版會自動分頁，多次呼叫 API，最多拿到 num 筆（上限 100）
+ * - ★ 新增：解析 snippet（搜尋摘要）
  */
 public class GoogleConnector {
 
     public static class Result {
-        public final String title, link;
-        public Result(String t, String l){ this.title = t; this.link = l; }
+        public final String title, link, snippet;
+        public Result(String t, String l, String s){ 
+            this.title = t; 
+            this.link = l; 
+            this.snippet = s != null ? s : "";
+        }
         @Override public String toString(){ return title + " -> " + link; }
     }
 
     private static final HttpClient CLIENT = HttpClient.newHttpClient();
     private static final Pattern TITLE = Pattern.compile("\"title\"\\s*:\\s*\"(.*?)\"", Pattern.DOTALL);
     private static final Pattern LINK  = Pattern.compile("\"link\"\\s*:\\s*\"(.*?)\"", Pattern.DOTALL);
+    private static final Pattern SNIPPET = Pattern.compile("\"snippet\"\\s*:\\s*\"(.*?)\"", Pattern.DOTALL);
 
     // 方便呼叫：預設 timeout 5s（每一頁各自 5s）
     public static List<Result> search(String query, int num) throws Exception {
@@ -104,19 +110,68 @@ public class GoogleConnector {
         return all;
     }
 
-    // 極簡 JSON 解析：依序配對 title/link
+    /**
+     * 解析 Google CSE JSON 回應
+     * ★ 改進：同時解析 title, link, snippet
+     */
     private static List<Result> parse(String json){
         List<Result> out = new ArrayList<>();
-        Matcher mt = TITLE.matcher(json);
-        Matcher ml = LINK.matcher(json);
-        while (mt.find() && ml.find()) {
-            String t = unescape(mt.group(1));
-            String l = unescape(ml.group(1));
-            if (!t.isBlank() && !l.isBlank()) {
-                out.add(new Result(t, l));
+        
+        // Google CSE 回傳的 JSON 格式是 "items": [{item1}, {item2}, ...]
+        // 我們需要找到每個 item 區塊，然後從中提取 title, link, snippet
+        
+        // 找到 items 陣列的開始位置
+        int itemsStart = json.indexOf("\"items\"");
+        if (itemsStart == -1) return out;
+        
+        // 從 items 開始找每個結果
+        // 每個結果都有 "title", "link", "snippet" 欄位
+        
+        // 使用更精確的方式：找到每個 "kind": "customsearch#result" 區塊
+        String[] items = json.split("\"kind\"\\s*:\\s*\"customsearch#result\"");
+        
+        for (int i = 1; i < items.length; i++) {  // 從 1 開始，因為第 0 個是 items 之前的內容
+            String item = items[i];
+            
+            // 限制範圍到下一個 item 或結束
+            int endIdx = item.indexOf("\"kind\"");
+            if (endIdx == -1) endIdx = item.length();
+            String itemContent = item.substring(0, endIdx);
+            
+            String title = extractField(itemContent, TITLE);
+            String link = extractField(itemContent, LINK);
+            String snippet = extractField(itemContent, SNIPPET);
+            
+            if (!title.isEmpty() && !link.isEmpty()) {
+                out.add(new Result(title, link, snippet));
             }
         }
+        
+        // 備用方案：如果上面沒解析到，用簡單的順序配對
+        if (out.isEmpty()) {
+            Matcher mt = TITLE.matcher(json);
+            Matcher ml = LINK.matcher(json);
+            Matcher ms = SNIPPET.matcher(json);
+            
+            while (mt.find() && ml.find()) {
+                String t = unescape(mt.group(1));
+                String l = unescape(ml.group(1));
+                String s = ms.find() ? unescape(ms.group(1)) : "";
+                if (!t.isBlank() && !l.isBlank()) {
+                    out.add(new Result(t, l, s));
+                }
+            }
+        }
+        
         return out;
+    }
+    
+    private static String extractField(String text, Pattern pattern) {
+        Matcher m = pattern.matcher(text);
+        if (m.find()) {
+            return unescape(m.group(1));
+        }
+        return "";
     }
 
     private static String unescape(String s){
