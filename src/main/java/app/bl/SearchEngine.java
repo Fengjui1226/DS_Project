@@ -2,6 +2,7 @@ package app.bl;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -9,6 +10,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import app.da.GoogleConnector;
@@ -267,9 +270,95 @@ public class SearchEngine {
     }
 
     private static LocalDate parseDate(String text, LocalDate today) {
-        if (text == null) return null;
-        // 這裡實際上會由 EventInfoExtractor 來處理，此為簡化接口
-        return null; 
+        if (text == null || text.isEmpty()) return null;
+        int currentYear = today.getYear();
+        
+        // 0. 標題年份快速判斷（如「2024全台活動」→ 過期）
+        Pattern yearOnlyPattern = Pattern.compile("(20[2-3][0-9])(?:年|全台|精選|最新|活動|整理|市集|展覽)");
+        Matcher ym = yearOnlyPattern.matcher(text);
+        if (ym.find()) {
+            int mentionedYear = Integer.parseInt(ym.group(1));
+            if (mentionedYear < currentYear) {
+                return LocalDate.of(mentionedYear, 12, 31); // 標記為該年底（過期）
+            }
+        }
+        
+        // 1. 完整日期格式 yyyy/MM/dd 或 yyyy-MM-dd 或 yyyy年M月d日
+        Pattern p1 = Pattern.compile("(20[2-3]\\d)[/.\\-年](0?[1-9]|1[0-2])[/.\\-月](0?[1-9]|[12]\\d|3[01])");
+        Matcher m1 = p1.matcher(text);
+        List<LocalDate> foundDates = new ArrayList<>();
+        
+        while (m1.find()) {
+            try {
+                int y = Integer.parseInt(m1.group(1));
+                int m = Integer.parseInt(m1.group(2));
+                int d = Integer.parseInt(m1.group(3));
+                LocalDate date = LocalDate.of(y, m, d);
+                foundDates.add(date);
+            } catch (Exception ignored) {}
+        }
+        
+        // 2. 民國年格式 1XX年M月d日
+        Pattern pRoc = Pattern.compile("(1[0-1]\\d)年(0?[1-9]|1[0-2])月(0?[1-9]|[12]\\d|3[01])日?");
+        Matcher mRoc = pRoc.matcher(text);
+        while (mRoc.find()) {
+            try {
+                int y = Integer.parseInt(mRoc.group(1)) + 1911;
+                int m = Integer.parseInt(mRoc.group(2));
+                int d = Integer.parseInt(mRoc.group(3));
+                LocalDate date = LocalDate.of(y, m, d);
+                foundDates.add(date);
+            } catch (Exception ignored) {}
+        }
+        
+        // 3. 無年份格式 M月d日（推測年份）
+        Pattern p2 = Pattern.compile("(?<!\\d)(0?[1-9]|1[0-2])月(0?[1-9]|[12]\\d|3[01])日?");
+        Matcher m2 = p2.matcher(text);
+        while (m2.find()) {
+            try {
+                int m = Integer.parseInt(m2.group(1));
+                int d = Integer.parseInt(m2.group(2));
+                
+                // 先檢查文中有沒有年份提示
+                int guessYear = currentYear;
+                Pattern anyYear = Pattern.compile("(20[2-3]\\d)");
+                Matcher ym2 = anyYear.matcher(text);
+                if (ym2.find()) {
+                    guessYear = Integer.parseInt(ym2.group(1));
+                }
+                
+                LocalDate date = LocalDate.of(guessYear, m, d);
+                // 如果日期已經過了超過2個月，可能是明年的
+                if (date.isBefore(today.minusMonths(2)) && guessYear == currentYear) {
+                    date = LocalDate.of(currentYear + 1, m, d);
+                }
+                foundDates.add(date);
+            } catch (Exception ignored) {}
+        }
+        
+        if (foundDates.isEmpty()) {
+            // 4. 特殊關鍵字
+            if (text.contains("即日起") || text.contains("常設展") || text.contains("長期展出")) {
+                return today.plusDays(30);
+            }
+            return null;
+        }
+        
+        // 優先回傳未來日期中最近的
+        List<LocalDate> futureDates = foundDates.stream()
+            .filter(d -> !d.isBefore(today))
+            .sorted()
+            .collect(Collectors.toList());
+        
+        if (!futureDates.isEmpty()) {
+            return futureDates.get(0);
+        }
+        
+        // 都是過去日期，回傳最近的（用於判斷過期）
+        return foundDates.stream()
+            .sorted(Collections.reverseOrder())
+            .findFirst()
+            .orElse(null);
     }
 
     private static String extractTitleFromUrl(String url) {
