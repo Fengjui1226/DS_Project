@@ -156,38 +156,68 @@ public class SearchEngine {
     }
 
     /**
-     * Query Refinement v2.0：加入年份過濾，專注找未來活動
+     * Query Refinement v8.0：智慧擴展版
+     * - 如果只有地點沒有活動類型，自動加上活動類型
+     * - 確保是台灣結果
+     * - ★ 新增：年份自動擴展 (2025 -> 2025 OR 2026)
      */
     private static String refineQuery(String query) {
         String q = (query == null) ? "" : query.trim();
         if (q.isEmpty()) return q;
-        StringBuilder sb = new StringBuilder(q);
-        String lower = q.toLowerCase();
         
-        // 取得當前年份和明年
+        String lower = q.toLowerCase();
+        StringBuilder sb = new StringBuilder(q);
+        
+        // ★ 檢查是否有活動類型關鍵字
+        boolean hasEventType = EVENT_TERMS.stream()
+            .anyMatch(term -> lower.contains(term.toLowerCase()));
+        
+        // ★ 檢查是否只是地點查詢（常見地點名稱）
+        Set<String> locationKeywords = Set.of(
+            "信義", "大安", "中山", "松山", "內湖", "士林", "北投", "萬華", "中正", "大同",
+            "板橋", "新店", "中和", "永和", "三重", "淡水", "西門", "東區", "天母",
+            "台北", "新北", "台中", "高雄", "台南", "桃園",
+            "華山", "松菸", "駁二", "草悟道", "逢甲", "一中"
+        );
+        
+        boolean isLocationOnly = locationKeywords.stream()
+            .anyMatch(loc -> lower.contains(loc)) && !hasEventType;
+        
+        // ★ 如果只有地點，加上活動類型擴展
+        if (isLocationOnly) {
+            sb.append(" (市集 OR 展覽 OR 演唱會 OR 音樂節 OR 活動 OR 演出 OR 表演)");
+            System.out.println("[Query] 偵測到純地點搜尋，自動擴展活動類型");
+        }
+        
+        // ★ 年份擴展邏輯：確保涵蓋跨年/明年活動
+        // 例如：現在是 2025，自動擴展為 (2025 OR 2026)
         int currentYear = LocalDate.now().getYear();
         int nextYear = currentYear + 1;
-
-        // ★ 核心改進：如果查詢沒有年份，加上年份限制
-        boolean hasYear = lower.matches(".*20[2-3][0-9].*");
-        if (!hasYear) {
-            // 加上當年或明年的關鍵字，確保找到的是近期/未來活動
-            sb.append(" (").append(currentYear).append(" OR ").append(nextYear).append(")");
+        String curYearStr = String.valueOf(currentYear);
+        String yearClause = "(" + currentYear + " OR " + nextYear + ")";
+        
+        // 情況 1: 查詢中已經包含今年 (例如 "2025")，將其擴展
+        if (sb.toString().contains(curYearStr)) {
+            // 用 replace 將 "2025" 換成 "(2025 OR 2026)"
+            // 注意：這裡簡單替換，避免正則表達式太複雜
+            String updated = sb.toString().replace(curYearStr, yearClause);
+            sb = new StringBuilder(updated);
+            System.out.println("[Query] 擴展現有年份: " + yearClause);
+        } 
+        // 情況 2: 查詢中完全沒提到年份 (且不是找舊資料)，則自動補上
+        else {
+            // 檢查是否包含其他 202x 年份 (避免干擾使用者查 2024 的舊資料)
+            boolean hasOtherYear = sb.toString().matches(".*202[0-4].*");
+            if (!hasOtherYear) {
+                sb.append(" ").append(yearClause);
+                System.out.println("[Query] 自動補上年份限制: " + yearClause);
+            }
         }
-
-        // 增加召回率：如果沒有明確活動詞，幫他補上
-        boolean hasEventWord = EVENT_TERMS.stream().anyMatch(t -> lower.contains(t.toLowerCase()));
-        if (!hasEventWord) {
-            sb.append(" (活動 OR 市集 OR 展覽)");
-        }
-
-        // 增加精準度：確保是台灣的資訊
+        
+        // 確保是台灣結果
         if (!lower.contains("台灣") && !lower.contains("taiwan")) {
             sb.append(" 台灣");
         }
-        
-        // ★ 注意：這裡完全不加 "-申請 -維修" 等負向詞
-        // 我們把這些留給後端 RankCalculator 來殺，以免 Google 誤殺好結果
         
         return sb.toString();
     }
@@ -197,8 +227,29 @@ public class SearchEngine {
     private static List<String> parseQueryTokens(String query) {
         List<String> tokens = new ArrayList<>();
         if (query == null) return tokens;
+        
+        // 先按空格分割
         for (String t : query.split("\\s+")) {
-            if (!t.isEmpty() && !t.startsWith("-")) tokens.add(t);
+            if (!t.isEmpty() && !t.startsWith("-")) {
+                tokens.add(t);
+                
+                // ★ 智慧拆解複合詞
+                // 假日市集 → 假日, 市集
+                // 聖誕市集 → 聖誕, 市集
+                // 創意市集 → 創意, 市集
+                // 演唱會 → 演唱, 會 (不拆)
+                String[] suffixes = {"市集", "展覽", "活動", "節", "祭", "日"};
+                for (String suffix : suffixes) {
+                    if (t.endsWith(suffix) && t.length() > suffix.length()) {
+                        String prefix = t.substring(0, t.length() - suffix.length());
+                        if (prefix.length() >= 2) {  // 前綴至少2個字
+                            if (!tokens.contains(prefix)) tokens.add(prefix);
+                        }
+                        if (!tokens.contains(suffix)) tokens.add(suffix);
+                        break;
+                    }
+                }
+            }
         }
         return tokens;
     }
@@ -356,46 +407,61 @@ public class SearchEngine {
         
         for (PageNode parent : pages) {
             List<SubPageNode> subPages = parent.getSubPages();
+            List<PageNode> promotedSubs = new ArrayList<>();
             
-            // 找出最相關的子網頁
-            SubPageNode bestSub = null;
-            double bestSubScore = 0;
-            
+            // ★ 找出所有相關的子網頁（不只最相關的一個）
             for (SubPageNode sub : subPages) {
-                // 計算子網頁與查詢的相關度
                 double relevance = calculateSubPageRelevance(sub, queryTokens);
-                if (relevance > bestSubScore) {
-                    bestSubScore = relevance;
-                    bestSub = sub;
+                
+                // 條件放寬：只要有任何關鍵字匹配就考慮提升
+                if (relevance >= 1.0 && !seenUrls.contains(sub.getUrl())) {
+                    PageNode promoted = convertSubToPage(sub, parent, queryTokens, today);
+                    if (promoted != null) {
+                        promoted.setScore(parent.getScore() * 0.5 + relevance * 2);
+                        promotedSubs.add(promoted);
+                        seenUrls.add(promoted.getUrl());
+                        System.out.println("[Promote] 提升子網頁: " + truncate(sub.getTitle(), 40));
+                    }
                 }
             }
             
-            // 判斷是否要提升子網頁
-            // 條件：子網頁相關度 > 閾值，且標題包含查詢關鍵字
-            boolean shouldPromote = bestSub != null && 
-                                   bestSubScore >= 3.0 &&
-                                   containsQueryTerms(bestSub.getTitle(), queryTokens);
-            
-            if (shouldPromote && !seenUrls.contains(bestSub.getUrl())) {
-                // 把子網頁轉換為 PageNode
-                PageNode promoted = convertSubToPage(bestSub, parent, queryTokens, today);
-                if (promoted != null) {
-                    // 繼承父網頁的部分分數
-                    promoted.setScore(parent.getScore() * 0.8 + bestSubScore);
-                    result.add(promoted);
-                    seenUrls.add(promoted.getUrl());
-                    System.out.println("[Promote] 提升子網頁: " + truncate(bestSub.getTitle(), 40));
+            // ★ 決定要保留父網頁還是子網頁
+            if (!promotedSubs.isEmpty()) {
+                // 有子網頁被提升，加入子網頁
+                result.addAll(promotedSubs);
+                
+                // 如果父網頁本身也有相關內容，也保留
+                if (isParentRelevant(parent, queryTokens)) {
+                    if (!seenUrls.contains(parent.getUrl())) {
+                        result.add(parent);
+                        seenUrls.add(parent.getUrl());
+                    }
                 }
-            }
-            
-            // 保留原始父網頁（如果還沒被加入）
-            if (!seenUrls.contains(parent.getUrl())) {
-                result.add(parent);
-                seenUrls.add(parent.getUrl());
+            } else {
+                // 沒有子網頁被提升，保留父網頁
+                if (!seenUrls.contains(parent.getUrl())) {
+                    result.add(parent);
+                    seenUrls.add(parent.getUrl());
+                }
             }
         }
         
         return result;
+    }
+    
+    /**
+     * 判斷父網頁本身是否相關（不只是靠子網頁）
+     */
+    private static boolean isParentRelevant(PageNode parent, List<String> queryTokens) {
+        String title = parent.getTitle() != null ? parent.getTitle().toLowerCase() : "";
+        int matchCount = 0;
+        for (String token : queryTokens) {
+            if (title.contains(token.toLowerCase())) {
+                matchCount++;
+            }
+        }
+        // 至少匹配一半的關鍵字
+        return matchCount >= Math.max(1, queryTokens.size() / 2);
     }
     
     /**
@@ -509,16 +575,61 @@ public class SearchEngine {
             }
         }
         
+        // 0.3 ★ 民國年快速判斷（如「108年度」「111年」）
+        int currentRocYear = currentYear - 1911;  // 2025 = 114年
+        Pattern rocYearPattern = Pattern.compile("(1[0-1][0-9])年(?:度)?(?:原|市集|活動|展覽|好市)");
+        Matcher rocMatcher = rocYearPattern.matcher(text);
+        if (rocMatcher.find()) {
+            int rocYear = Integer.parseInt(rocMatcher.group(1));
+            if (rocYear < currentRocYear - 1) {  // 兩年前的民國年
+                int adYear = rocYear + 1911;
+                return LocalDate.of(adYear, 12, 31); // 標記為該年底（過期）
+            }
+        }
+        
         // 0.5 相對日期（今天、明天、這週末等）
         LocalDate relativeDate = parseRelativeDate(text, today);
         if (relativeDate != null) {
             return relativeDate;
         }
         
-        // 1. 完整日期格式 yyyy/MM/dd 或 yyyy-MM-dd 或 yyyy年M月d日
+        List<LocalDate> foundDates = new ArrayList<>();
+        
+        // ★ 1. 優先處理民國年格式（如「111年10月2日」「111年國慶」）
+        // 這個要最先處理，避免後面的規則誤判
+        Pattern pRocFull = Pattern.compile("(1[0-1]\\d)年(?:(0?[1-9]|1[0-2])月(0?[1-9]|[12]\\d|3[01])日?)?");
+        Matcher mRocFull = pRocFull.matcher(text);
+        boolean hasRocYear = false;
+        int rocAdYear = 0;
+        
+        while (mRocFull.find()) {
+            hasRocYear = true;
+            int rocYear = Integer.parseInt(mRocFull.group(1));
+            rocAdYear = rocYear + 1911;
+            
+            if (mRocFull.group(2) != null && mRocFull.group(3) != null) {
+                // 有完整日期
+                try {
+                    int m = Integer.parseInt(mRocFull.group(2));
+                    int d = Integer.parseInt(mRocFull.group(3));
+                    LocalDate date = LocalDate.of(rocAdYear, m, d);
+                    foundDates.add(date);
+                } catch (Exception ignored) {}
+            } else {
+                // 只有年份（如「111年國慶」）
+                // 標記為該年的活動，方便後續判斷過期
+                foundDates.add(LocalDate.of(rocAdYear, 12, 31));
+            }
+        }
+        
+        // ★ 如果有民國年且是舊年份，直接回傳（用於過期判斷）
+        if (hasRocYear && rocAdYear < currentYear) {
+            return foundDates.isEmpty() ? LocalDate.of(rocAdYear, 12, 31) : foundDates.get(0);
+        }
+        
+        // 2. 完整西元日期格式 yyyy/MM/dd 或 yyyy-MM-dd 或 yyyy年M月d日
         Pattern p1 = Pattern.compile("(20[2-3]\\d)[/.\\-年](0?[1-9]|1[0-2])[/.\\-月](0?[1-9]|[12]\\d|3[01])");
         Matcher m1 = p1.matcher(text);
-        List<LocalDate> foundDates = new ArrayList<>();
         
         while (m1.find()) {
             try {
@@ -530,63 +641,69 @@ public class SearchEngine {
             } catch (Exception ignored) {}
         }
         
-        // 2. 民國年格式 1XX年M月d日
-        Pattern pRoc = Pattern.compile("(1[0-1]\\d)年(0?[1-9]|1[0-2])月(0?[1-9]|[12]\\d|3[01])日?");
-        Matcher mRoc = pRoc.matcher(text);
-        while (mRoc.find()) {
-            try {
-                int y = Integer.parseInt(mRoc.group(1)) + 1911;
-                int m = Integer.parseInt(mRoc.group(2));
-                int d = Integer.parseInt(mRoc.group(3));
-                LocalDate date = LocalDate.of(y, m, d);
-                foundDates.add(date);
-            } catch (Exception ignored) {}
+        // 3. 年份...月日 格式（如「2025台北花伴野餐3月15日」）
+        Pattern yearPattern = Pattern.compile("(20[2-3]\\d)(?:年|台|活動|花|聖誕|跨年|春節|演唱|展覽|市集)");
+        Matcher yearMatcher = yearPattern.matcher(text);
+        while (yearMatcher.find()) {
+            int foundYear = Integer.parseInt(yearMatcher.group(1));
+            String afterYear = text.substring(yearMatcher.end());
+            Pattern monthDayPattern = Pattern.compile("^.{0,30}?(0?[1-9]|1[0-2])月(0?[1-9]|[12]\\d|3[01])日?");
+            Matcher mdMatcher = monthDayPattern.matcher(afterYear);
+            if (mdMatcher.find()) {
+                try {
+                    int m = Integer.parseInt(mdMatcher.group(1));
+                    int d = Integer.parseInt(mdMatcher.group(2));
+                    LocalDate date = LocalDate.of(foundYear, m, d);
+                    foundDates.add(date);
+                } catch (Exception ignored) {}
+            }
         }
         
-        // 3. 無年份格式 M月d日（推測年份）
-        Pattern p2 = Pattern.compile("(?<!\\d)(0?[1-9]|1[0-2])月(0?[1-9]|[12]\\d|3[01])日?");
-        Matcher m2 = p2.matcher(text);
-        while (m2.find()) {
-            try {
-                int m = Integer.parseInt(m2.group(1));
-                int d = Integer.parseInt(m2.group(2));
-                
-                // ★ 改進：尋找「活動相關」的年份，忽略「更新日期」等
-                int guessYear = currentYear;
-                
-                // 先找活動年份模式（如 "2025年活動"、"2025聖誕"）
-                Pattern eventYear = Pattern.compile("(20[2-3]\\d)(?:年)?(?:活動|市集|展覽|演唱|音樂|聖誕|跨年|春節)");
-                Matcher eym = eventYear.matcher(text);
-                if (eym.find()) {
-                    guessYear = Integer.parseInt(eym.group(1));
-                } else {
-                    // 沒有活動年份，檢查是否有舊年份的「更新」字樣
-                    Pattern oldUpdatePattern = Pattern.compile("(20[2-3]\\d)[/\\-](\\d{1,2})[/\\-](\\d{1,2})(?:更新|發布|編輯)");
-                    Matcher oldUpdate = oldUpdatePattern.matcher(text);
-                    boolean hasOldUpdate = oldUpdate.find() && Integer.parseInt(oldUpdate.group(1)) < currentYear;
+        // ★ 4. 檢查「張貼日期」「更新日期」等，這些是文章日期而非活動日期
+        // 如果有這些標記且是舊日期，標記為過期
+        Pattern postDatePattern = Pattern.compile("(?:張貼日期|發布日期|更新日期|發佈)[：:]?\\s*(20[1-2]\\d)[/.\\-](0?[1-9]|1[0-2])[/.\\-](0?[1-9]|[12]\\d|3[01])");
+        Matcher postMatcher = postDatePattern.matcher(text);
+        if (postMatcher.find()) {
+            int postYear = Integer.parseInt(postMatcher.group(1));
+            if (postYear < currentYear - 1) {
+                // 文章是兩年前的，標記為過期
+                try {
+                    int m = Integer.parseInt(postMatcher.group(2));
+                    int d = Integer.parseInt(postMatcher.group(3));
+                    return LocalDate.of(postYear, m, d);  // 回傳過期日期
+                } catch (Exception ignored) {}
+            }
+        }
+        
+        // 5. 無年份格式 M月d日（只有在沒找到其他日期時才使用）
+        if (foundDates.isEmpty()) {
+            Pattern p2 = Pattern.compile("(?<!\\d)(0?[1-9]|1[0-2])月(0?[1-9]|[12]\\d|3[01])日?");
+            Matcher m2 = p2.matcher(text);
+            while (m2.find()) {
+                try {
+                    int m = Integer.parseInt(m2.group(1));
+                    int d = Integer.parseInt(m2.group(2));
                     
-                    if (!hasOldUpdate) {
-                        // 沒有舊的更新日期，找任何年份
-                        Pattern anyYear = Pattern.compile("(20[2-3]\\d)");
-                        Matcher ym2 = anyYear.matcher(text);
-                        while (ym2.find()) {
-                            int foundYear = Integer.parseInt(ym2.group(1));
-                            // 只使用當年或未來年份
-                            if (foundYear >= currentYear) {
-                                guessYear = foundYear;
-                                break;
-                            }
-                        }
+                    // ★ 只有在有明確的當年/未來年份時才推測
+                    int guessYear = currentYear;
+                    
+                    // 找活動年份模式
+                    Pattern eventYear = Pattern.compile("(20[2-3]\\d)(?:年)?(?:活動|市集|展覽|演唱|音樂|聖誕|跨年|春節)");
+                    Matcher eym = eventYear.matcher(text);
+                    if (eym.find()) {
+                        guessYear = Integer.parseInt(eym.group(1));
+                    } else {
+                        // 沒有找到活動年份，不推測，跳過這個日期
+                        continue;
                     }
-                }
-                
-                LocalDate date = LocalDate.of(guessYear, m, d);
-                // 如果日期已經過了超過2個月，可能是明年的
-                if (date.isBefore(today.minusMonths(2)) && guessYear == currentYear) {
-                    date = LocalDate.of(currentYear + 1, m, d);
-                }
-                foundDates.add(date);
-            } catch (Exception ignored) {}
+                    
+                    LocalDate date = LocalDate.of(guessYear, m, d);
+                    if (date.isBefore(today.minusMonths(2)) && guessYear == currentYear) {
+                        date = LocalDate.of(currentYear + 1, m, d);
+                    }
+                    foundDates.add(date);
+                } catch (Exception ignored) {}
+            }
         }
         
         if (foundDates.isEmpty()) {

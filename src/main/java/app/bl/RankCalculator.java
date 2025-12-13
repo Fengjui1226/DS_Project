@@ -11,39 +11,52 @@ import java.util.regex.Pattern;
 import static app.bl.Constants.*;
 
 /**
- * RankCalculator v7.1 - 最終權威優化版
- * * 新增：
- * 1. [權威加權] 針對 Accupass, Opentix 等給予 1.3 倍加分 (不含 Klook/KKday)。
- * 2. [資訊加權] 成功解析日期的頁面給予 1.2 倍加分。
- * 3. [常數整合] 使用 Constants 中的 NOISE_KEYWORDS 進行過濾。
+ * RankCalculator v8.0 - 全面優化版
+ * 
+ * 評分公式：
+ * 最終分數 = (baseScore + textScore + dateScore + freshnessScore) × multiplier
+ * 
+ * 改善重點：
+ * 1. [過期寬鬆] 沒有日期的結果不被殺，只是分數較低
+ * 2. [部分匹配] 標題部分匹配也給分
+ * 3. [新鮮度] 保留 Google 原始排序作為分數因子
+ * 4. [全面性] 適用市集、演唱會、展覽、戶外活動等各類活動
  */
 public class RankCalculator {
 
-    // ================= 權重設定 =================
-    private static final double W_EXACT_TITLE = 50.0;
-    private static final double W_EXACT_CONTENT = 25.0;
-    private static final double W_PROPER_NOUN_TITLE = 15.0;
-    private static final double W_PROPER_NOUN_CONTENT = 5.0;
-    private static final double W_KEYWORD_TITLE = 20.0;
-    private static final double W_KEYWORD_CONTENT = 5.0;
+    // ================= 文字匹配權重 =================
+    private static final double W_EXACT_TITLE = 40.0;       // 標題完全匹配查詢
+    private static final double W_HALF_MATCH_TITLE = 25.0;  // 標題匹配一半以上關鍵字
+    private static final double W_PARTIAL_TITLE = 12.0;     // 標題匹配任一關鍵字
+    private static final double W_EXACT_CONTENT = 15.0;     // 內容完全匹配
+    private static final double W_PARTIAL_CONTENT = 5.0;    // 內容部分匹配
     
-    private static final double P_NO_PROPER_NOUN = -10.0;
-    private static final double P_MISSING_INTENT = -50.0;
-    private static final double P_FOREIGN_CONTENT = -50.0;
+    private static final double W_PROPER_NOUN_TITLE = 12.0; // 標題有專有名詞
+    private static final double W_PROPER_NOUN_CONTENT = 4.0;// 內容有專有名詞
+    
+    // ================= 日期權重 =================
+    private static final double W_DATE_SOON = 25.0;         // 活動在 30 天內
+    private static final double W_DATE_NEAR = 15.0;         // 活動在 30-90 天
+    private static final double W_DATE_FUTURE = 8.0;        // 活動在 90 天後
+    private static final double W_DATE_QUERY_MATCH = 30.0;  // 日期匹配查詢
+    
+    // ================= 新鮮度權重（Google 排序） =================
+    private static final double W_GOOGLE_RANK_BASE = 10.0;  // Google 排名基礎分
+    private static final double W_GOOGLE_RANK_DECAY = 0.5;  // 每名衰減
+    
+    // ================= 懲罰 =================
+    private static final double P_NO_KEYWORD_MATCH = -20.0; // 沒有任何關鍵字匹配
+    private static final double P_FOREIGN_CONTENT = -40.0;  // 海外內容
+    private static final double P_NO_DATE = -5.0;           // 沒有日期（輕微懲罰，不殺死）
 
-    private static final double W_DATE_FRESH = 20.0;
-    private static final double W_DATE_FUTURE = 10.0;
-    private static final double W_DATE_QUERY_MATCH = 40.0;
-
-    // ================= 乘數加成 (Multipliers) =================
-    private static final double M_CITY_MATCH = 1.3;         // 城市匹配很重要
-    private static final double M_CITY_MISMATCH = 0.5;      // 城市不對扣分重
-    private static final double M_AUTHORITY_DOMAIN = 1.3;   // ★ 新增：權威網域加成 (1.3倍)
-    private static final double M_INFO_RICH = 1.2;          // ★ 新增：有日期資訊加成 (1.2倍)
-    private static final double M_SOURCE_GOV = 1.1;         // 政府網域微幅加成
-    private static final double M_APPLICATION_PENALTY = 0.2;// 申請類打2折
-    private static final double M_NOISE_PENALTY = 0.05;     // 垃圾內容打0.5折 (幾乎殺死)
-    private static final double M_EXPIRED_PENALTY = 0.0;    // 過期直接處決
+    // ================= 乘數 (Multipliers) =================
+    private static final double M_CITY_MATCH = 1.25;        // 城市匹配
+    private static final double M_CITY_MISMATCH = 0.6;      // 城市不匹配
+    private static final double M_INFO_RICH = 1.15;         // 有完整資訊（日期+地點）
+    private static final double M_HAS_DATE_ONLY = 1.08;     // 只有日期
+    private static final double M_APPLICATION_PENALTY = 0.15;// 申請類
+    private static final double M_NOISE_PENALTY = 0.0;      // 垃圾內容直接殺
+    private static final double M_EXPIRED_PENALTY = 0.0;    // 確定過期才殺
 
     /**
      * 主要排名入口
@@ -51,7 +64,7 @@ public class RankCalculator {
     public static void rank(List<PageNode> pages, UserProfile user, String originalQuery) {
         if (pages == null || pages.isEmpty()) return;
 
-        System.out.println("\n🎯 開始計算排名分數 (Formula V7.1 - Authority Boost)...");
+        System.out.println("\n🎯 開始計算排名分數 (Formula V8.0)...");
         LocalDate today = LocalDate.now();
 
         List<String> queryTokens = new ArrayList<>();
@@ -62,6 +75,11 @@ public class RankCalculator {
         for (String token : queryTokens) {
             if (isProperNoun(token)) properNounTokens.add(token);
             else normalTokens.add(token);
+        }
+
+        // ★ 記錄 Google 原始排序
+        for (int i = 0; i < pages.size(); i++) {
+            pages.get(i).setGoogleRank(i + 1);
         }
 
         for (PageNode p : pages) {
@@ -85,11 +103,24 @@ public class RankCalculator {
         double baseScore = p.getScore();
         double textScore = calculateTextScore(p, originalQuery, properNouns, normalTokens);
         double dateScore = calculateDateScore(p, originalQuery, today);
+        double freshnessScore = calculateFreshnessScore(p);
         
         double multiplier = calculateMultiplier(p, user, today);
 
-        double finalScore = (baseScore + textScore + dateScore) * multiplier;
+        double finalScore = (baseScore + textScore + dateScore + freshnessScore) * multiplier;
         return Math.max(0.0, finalScore);
+    }
+
+    /**
+     * 新鮮度分數：基於 Google 原始排序
+     */
+    private static double calculateFreshnessScore(PageNode p) {
+        int rank = p.getGoogleRank();
+        if (rank <= 0) rank = 20;
+        
+        // Google 排名越前面，分數越高
+        double score = W_GOOGLE_RANK_BASE - (rank - 1) * W_GOOGLE_RANK_DECAY;
+        return Math.max(0, score);
     }
 
     private static double calculateMultiplier(PageNode p, UserProfile user, LocalDate today) {
@@ -98,72 +129,42 @@ public class RankCalculator {
         String url = p.getUrl() != null ? p.getUrl().toLowerCase() : "";
         String domain = p.getDomain() != null ? p.getDomain().toLowerCase() : "";
         
-        // 1. 過期處決
+        // 1. 過期處理（寬鬆版）
         LocalDate eventDate = p.getEventDate();
         if (eventDate != null) {
-            if (eventDate.isBefore(today)) return M_EXPIRED_PENALTY;
-            
-            // ★ 如果成功解析出日期，代表這是高品質活動頁，給予加分
-            multiplier *= M_INFO_RICH;
+            if (eventDate.isBefore(today)) {
+                System.out.println("  [EXPIRED] " + truncate(title, 30) + " | " + eventDate);
+                return M_EXPIRED_PENALTY;
+            }
+            // 有日期資訊加成
+            if (p.getCity() != null && !p.getCity().isEmpty()) {
+                multiplier *= M_INFO_RICH;
+            } else {
+                multiplier *= M_HAS_DATE_ONLY;
+            }
         }
 
-        // 2. 標題/內容年份檢查 (針對沒有 eventDate 的頁面)
+        // 2. 標題年份檢查（只針對明確過期的）
         int currentYear = today.getYear();
-        String content = p.getTextContent() != null ? p.getTextContent() : "";
-        String combined = title + " " + content;
-        
-        // ★ 新增：檢查文章更新日期（如 "2022/11/16更新"）
-        Pattern updateDatePattern = Pattern.compile("(20[1-2][0-9])[/\\-](\\d{1,2})[/\\-](\\d{1,2})(?:更新|發布|編輯|發佈)");
-        Matcher updateMatcher = updateDatePattern.matcher(combined);
-        if (updateMatcher.find()) {
-            int updateYear = Integer.parseInt(updateMatcher.group(1));
-            // 如果更新日期是去年或更早，很可能是舊文章
-            if (updateYear < currentYear - 1) {
+        Pattern oldEventPattern = Pattern.compile("(201[0-9]|202[0-3])(?:年)?(?:全台|精選|最新|整理|市集|展覽|演唱會|音樂節)");
+        Matcher m = oldEventPattern.matcher(title);
+        if (m.find()) {
+            int foundYear = Integer.parseInt(m.group(1));
+            if (foundYear < currentYear - 1) {
+                System.out.println("  [OLD-YEAR] " + truncate(title, 30) + " | " + foundYear + "年");
                 return M_EXPIRED_PENALTY;
             }
         }
-        
-        // 檢查是否有過期年份標記（如「2024全台」「2023精選」）
-        Pattern oldYearPattern = Pattern.compile("(20[1-2][0-9])(?:年|全台|精選|最新|活動|整理|市集|展覽|聖誕|跨年)");
-        Matcher m = oldYearPattern.matcher(combined);
-        boolean hasOldYear = false;
-        boolean hasFutureYear = false;
-        
-        while (m.find()) {
-            int foundYear = Integer.parseInt(m.group(1));
-            if (foundYear < currentYear) {
-                hasOldYear = true;
-            } else if (foundYear >= currentYear) {
-                hasFutureYear = true;
-            }
-        }
-        
-        // 如果有舊年份且沒有新年份，判定為過期
-        if (hasOldYear && !hasFutureYear) {
-            return M_EXPIRED_PENALTY;
-        }
 
-        // 3. 垃圾內容過濾 (使用 Constants 中的黑名單)
+        // 3. 垃圾內容過濾
         for (String noise : NOISE_KEYWORDS) {
-            if (title.contains(noise)) return M_NOISE_PENALTY;
-        }
-
-        // 4. ★ 權威網域加成 (使用 Constants 中的白名單)
-        // Klook/KKday 不在名單內，所以不會加分
-        for (String authDomain : AUTHORITY_DOMAINS) {
-            if (domain.contains(authDomain)) {
-                multiplier *= M_AUTHORITY_DOMAIN;
-                break;
+            if (title.contains(noise)) {
+                System.out.println("  [NOISE] " + truncate(title, 30) + " | " + noise);
+                return M_NOISE_PENALTY;
             }
         }
-        
-        // 5. 政府網域加成
-        if (domain.endsWith(".gov.tw") && 
-           (domain.contains("culture") || domain.contains("moc") || domain.contains("tourism"))) {
-            multiplier *= M_SOURCE_GOV;
-        }
 
-        // 6. 申請/辦法類懲罰
+        // 4. 申請/辦法類懲罰
         for (String keyword : APPLICATION_KEYWORDS) {
             if (title.contains(keyword) || url.contains(keyword)) {
                 multiplier *= M_APPLICATION_PENALTY;
@@ -171,15 +172,15 @@ public class RankCalculator {
             }
         }
 
-        // 7. 活動類型加成
+        // 5. 活動類型加成
         for (var entry : EVENT_TYPE_BOOST.entrySet()) {
-            if (title.contains(entry.getKey().toLowerCase())) {
+            if (title.contains(entry.getKey())) {
                 multiplier *= entry.getValue();
                 break;
             }
         }
 
-        // 8. 城市匹配
+        // 6. 城市匹配
         String userCity = (user != null) ? user.getUserCity() : null;
         String pageCity = p.getCity();
         if (userCity != null && pageCity != null && !pageCity.isEmpty() && !"全台".equals(pageCity)) {
@@ -193,10 +194,16 @@ public class RankCalculator {
     private static double calculateDateScore(PageNode p, String originalQuery, LocalDate today) {
         double score = 0.0;
         LocalDate eventDate = p.getEventDate();
+        
         if (eventDate != null) {
             long daysDiff = ChronoUnit.DAYS.between(today, eventDate);
-            if (daysDiff >= 0 && daysDiff <= 60) score += W_DATE_FRESH;
-            else if (daysDiff > 60) score += W_DATE_FUTURE;
+            if (daysDiff >= 0 && daysDiff <= 30) {
+                score += W_DATE_SOON;
+            } else if (daysDiff > 30 && daysDiff <= 90) {
+                score += W_DATE_NEAR;
+            } else if (daysDiff > 90) {
+                score += W_DATE_FUTURE;
+            }
             
             if (originalQuery != null) {
                 QueryUnderstanding.DateRange queryDateRange = QueryUnderstanding.getDateRange(originalQuery);
@@ -204,7 +211,10 @@ public class RankCalculator {
                     score += W_DATE_QUERY_MATCH;
                 }
             }
+        } else {
+            score += P_NO_DATE;
         }
+        
         return score;
     }
 
@@ -216,40 +226,71 @@ public class RankCalculator {
         String content = p.getTextContent() != null ? p.getTextContent() : "";
         String contentLower = content.toLowerCase();
 
+        // 1. 完全匹配檢查
         if (originalQuery != null && !originalQuery.trim().isEmpty()) {
-            String q = originalQuery.trim();
-            if (title.contains(q)) score += W_EXACT_TITLE;
-            else if (content.contains(q)) score += W_EXACT_CONTENT;
+            String q = originalQuery.trim().toLowerCase();
+            if (titleLower.contains(q)) {
+                score += W_EXACT_TITLE;
+            } else if (contentLower.contains(q)) {
+                score += W_EXACT_CONTENT;
+            }
         }
 
-        int properMatches = 0;
-        for (String noun : properNouns) {
-            String n = noun.toLowerCase();
-            if (titleLower.contains(n)) { score += W_PROPER_NOUN_TITLE; properMatches++; }
-            else if (contentLower.contains(n)) { score += W_PROPER_NOUN_CONTENT; properMatches++; }
-        }
-        if (!properNouns.isEmpty() && properMatches == 0) score += P_NO_PROPER_NOUN;
-
-        int normalMatches = 0;
-        for (String token : normalTokens) {
+        // 2. 部分匹配檢查
+        List<String> allTokens = new ArrayList<>();
+        allTokens.addAll(properNouns);
+        allTokens.addAll(normalTokens);
+        
+        int titleMatches = 0;
+        int contentMatches = 0;
+        
+        for (String token : allTokens) {
             String t = token.toLowerCase();
-            if (titleLower.contains(t)) { score += W_KEYWORD_TITLE; normalMatches++; }
-            else if (contentLower.contains(t)) { score += W_KEYWORD_CONTENT; normalMatches++; }
-        }
-
-        if (!normalTokens.isEmpty() && normalMatches == 0) score += P_MISSING_INTENT;
-
-        int totalTokens = properNouns.size() + normalTokens.size();
-        if (totalTokens > 0) {
-            double ratio = (double) (properMatches + normalMatches) / totalTokens;
-            score *= (1.0 + ratio);
+            if (titleLower.contains(t)) {
+                titleMatches++;
+            } else if (contentLower.contains(t)) {
+                contentMatches++;
+            }
         }
         
+        if (!allTokens.isEmpty()) {
+            double matchRatio = (double) titleMatches / allTokens.size();
+            if (matchRatio >= 0.5) {
+                score += W_HALF_MATCH_TITLE;
+            } else if (titleMatches > 0) {
+                score += W_PARTIAL_TITLE;
+            }
+            
+            if (contentMatches > 0) {
+                score += W_PARTIAL_CONTENT * Math.min(contentMatches, 3);
+            }
+            
+            if (titleMatches == 0 && contentMatches == 0) {
+                score += P_NO_KEYWORD_MATCH;
+            }
+        }
+
+        // 3. 專有名詞額外加分
+        for (String noun : properNouns) {
+            String n = noun.toLowerCase();
+            if (titleLower.contains(n)) {
+                score += W_PROPER_NOUN_TITLE;
+            } else if (contentLower.contains(n)) {
+                score += W_PROPER_NOUN_CONTENT;
+            }
+        }
+        
+        // 4. 海外內容懲罰
         boolean isForeign = false;
         for (String fk : FOREIGN_KEYWORDS_CORE) {
-            if (titleLower.contains(fk) || contentLower.contains(fk)) { isForeign = true; break; }
+            if (titleLower.contains(fk) || contentLower.contains(fk)) {
+                isForeign = true;
+                break;
+            }
         }
-        if (isForeign && !hasTaiwanLocation(title + " " + content)) score += P_FOREIGN_CONTENT;
+        if (isForeign && !hasTaiwanLocation(title + " " + content)) {
+            score += P_FOREIGN_CONTENT;
+        }
 
         return score;
     }
@@ -261,10 +302,21 @@ public class RankCalculator {
         return false;
     }
 
+    private static boolean hasTaiwanLocation(String text) {
+        Set<String> taiwanLocations = Set.of(
+            "台北", "臺北", "新北", "桃園", "台中", "臺中", "台南", "臺南", 
+            "高雄", "新竹", "基隆", "嘉義", "宜蘭", "花蓮", "台東", "臺東",
+            "澎湖", "金門", "馬祖", "屏東", "苗栗", "彰化", "南投", "雲林"
+        );
+        for (String loc : taiwanLocations) {
+            if (text.contains(loc)) return true;
+        }
+        return false;
+    }
+
     private static void normalizeScores(List<PageNode> pages) {
         if (pages.isEmpty()) return;
         
-        // 移除 0 分 (被處決) 的結果
         pages.removeIf(p -> p.getTotalScore() <= 0.01);
         if (pages.isEmpty()) return;
 
@@ -277,5 +329,10 @@ public class RankCalculator {
             double normalized = ((p.getTotalScore() - minScore) / range) * 90 + 10;
             p.setTotalScore(Math.round(normalized * 10) / 10.0);
         }
+    }
+    
+    private static String truncate(String s, int len) {
+        if (s == null) return "";
+        return s.length() > len ? s.substring(0, len) + "..." : s;
     }
 }

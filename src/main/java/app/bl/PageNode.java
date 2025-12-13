@@ -28,6 +28,7 @@ public class PageNode {
     private double score = 0.0;           // 自身分數
     private double subPagesScore = 0.0;   // 子網頁分數總和
     private double totalScore = 0.0;      // 總分
+    private int googleRank = 0;           // Google 原始排名
     
     // 子網頁
     private List<SubPageNode> subPages = new ArrayList<>();
@@ -109,6 +110,14 @@ public class PageNode {
     
     public void setTotalScore(double totalScore) {
         this.totalScore = totalScore;
+    }
+    
+    public int getGoogleRank() {
+        return googleRank;
+    }
+    
+    public void setGoogleRank(int rank) {
+        this.googleRank = rank;
     }
     
     public double calculateProximityBonus(List<String> queryTokens) {
