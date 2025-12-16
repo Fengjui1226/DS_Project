@@ -345,4 +345,282 @@ public static final Map<String, double[]> DISTRICT_COORDS = Map.ofEntries(
     public static String getCityByVenue(String venue) {
         return VENUE_CITY.get(venue);
     }
+    
+    // ==================== 🆕 新增常數 ====================
+    
+    // ★ 1. 售票平台識別（用於優先處理、解析優化）
+    public static final Map<String, String> TICKETING_PLATFORMS = Map.ofEntries(
+        Map.entry("kktix.com", "KKTIX"),
+        Map.entry("accupass.com", "Accupass"),
+        Map.entry("tixcraft.com", "拓元"),
+        Map.entry("ticket.com.tw", "年代售票"),
+        Map.entry("opentix.life", "OPENTIX"),
+        Map.entry("ibon.com.tw", "ibon售票"),
+        Map.entry("gomaji.com", "GOMAJI"),
+        Map.entry("indievox.com", "iNDIEVOX"),
+        Map.entry("ticketmaster.com.tw", "Ticketmaster"),
+        Map.entry("cityline.com", "城市售票網")
+    );
+    
+    // ★ 2. 活動資訊網站（高品質來源）
+    public static final Set<String> EVENT_INFO_SITES = Set.of(
+        "taipei-walkin.tw",      // 台北散步
+        "travelking.com.tw",     // 旅遊王
+        "fun-life.com.tw",       // 滿分的旅遊
+        "funtime.com.tw",        // FunTime
+        "walkerland.com.tw",     // 窩客島
+        "mook.com.tw",           // MOOK景點家
+        "bring4u.tw",            // 帶你去旅行
+        "shopee.tw/m/events",    // 蝦皮活動
+        "klook.com/zh-TW"        // Klook
+    );
+    
+    // ★ 3. 日期相關關鍵字（用於 parseDate 增強）
+    public static final Map<String, Integer> RELATIVE_DATE_KEYWORDS = Map.ofEntries(
+        Map.entry("今天", 0),
+        Map.entry("明天", 1),
+        Map.entry("後天", 2),
+        Map.entry("大後天", 3),
+        Map.entry("今日", 0),
+        Map.entry("明日", 1),
+        Map.entry("本週", 7),    // 範圍
+        Map.entry("下週", 14),   // 範圍
+        Map.entry("這週", 7),
+        Map.entry("下周", 14),
+        Map.entry("本月", 30),
+        Map.entry("下個月", 60)
+    );
+    
+    // ★ 4. 特殊節日對應日期（每年固定）
+    public static final Map<String, int[]> HOLIDAY_DATES = Map.ofEntries(
+        // 格式: {月, 日, 範圍天數}
+        Map.entry("元旦", new int[]{1, 1, 3}),
+        Map.entry("跨年", new int[]{12, 31, 3}),
+        Map.entry("情人節", new int[]{2, 14, 3}),
+        Map.entry("白色情人節", new int[]{3, 14, 3}),
+        Map.entry("愚人節", new int[]{4, 1, 1}),
+        Map.entry("勞動節", new int[]{5, 1, 3}),
+        Map.entry("母親節", new int[]{5, 10, 7}),      // 5月第二個週日附近
+        Map.entry("父親節", new int[]{8, 8, 3}),
+        Map.entry("七夕", new int[]{8, 4, 7}),         // 農曆七月七，約在8月
+        Map.entry("中秋", new int[]{9, 17, 7}),        // 農曆八月十五，約在9月
+        Map.entry("雙十節", new int[]{10, 10, 3}),
+        Map.entry("國慶", new int[]{10, 10, 3}),
+        Map.entry("萬聖節", new int[]{10, 31, 7}),
+        Map.entry("光棍節", new int[]{11, 11, 3}),
+        Map.entry("感恩節", new int[]{11, 24, 3}),
+        Map.entry("聖誕節", new int[]{12, 25, 7}),
+        Map.entry("耶誕節", new int[]{12, 25, 7}),
+        Map.entry("平安夜", new int[]{12, 24, 3})
+    );
+    
+    // ★ 5. 價格相關關鍵字
+    public static final Set<String> FREE_KEYWORDS = Set.of(
+        "免費", "免票", "free", "FREE", "Free",
+        "免費入場", "入場免費", "免費參觀", "自由入場",
+        "免費參加", "無料", "0元", "免門票", "免費索票"
+    );
+    
+    public static final Set<String> PAID_KEYWORDS = Set.of(
+        "售票", "購票", "票價", "門票", "入場券",
+        "早鳥票", "預售票", "現場票", "VIP票",
+        "全票", "優待票", "學生票", "團體票"
+    );
+    
+    // ★ 6. 時段關鍵字（用於判斷活動時間）
+    public static final Map<String, int[]> TIME_PERIOD_KEYWORDS = Map.ofEntries(
+        // 格式: {開始小時, 結束小時}
+        Map.entry("早上", new int[]{6, 12}),
+        Map.entry("上午", new int[]{6, 12}),
+        Map.entry("中午", new int[]{11, 14}),
+        Map.entry("下午", new int[]{12, 18}),
+        Map.entry("傍晚", new int[]{16, 19}),
+        Map.entry("晚上", new int[]{18, 23}),
+        Map.entry("晚間", new int[]{18, 23}),
+        Map.entry("深夜", new int[]{22, 4}),
+        Map.entry("凌晨", new int[]{0, 6}),
+        Map.entry("全天", new int[]{0, 24}),
+        Map.entry("整天", new int[]{0, 24})
+    );
+    
+    // ★ 7. 活動規模關鍵字（用於排名調整）
+    public static final Map<String, Double> EVENT_SCALE_BOOST = Map.ofEntries(
+        Map.entry("國際", 1.2),
+        Map.entry("世界", 1.2),
+        Map.entry("全球", 1.2),
+        Map.entry("亞洲", 1.15),
+        Map.entry("全國", 1.1),
+        Map.entry("全台", 1.1),
+        Map.entry("首次", 1.15),
+        Map.entry("首度", 1.15),
+        Map.entry("獨家", 1.1),
+        Map.entry("限定", 1.1),
+        Map.entry("限量", 1.1),
+        Map.entry("最後", 1.1),     // 最後一場
+        Map.entry("告別", 1.15),    // 告別演唱會
+        Map.entry("加場", 1.1),
+        Map.entry("安可", 1.1)
+    );
+    
+    // ★ 8. 目標客群關鍵字
+    public static final Set<String> AUDIENCE_KEYWORDS = Set.of(
+        // 年齡層
+        "親子", "兒童", "幼兒", "小朋友", "青少年", "大學生", "上班族", "銀髮族", "樂齡",
+        // 興趣群體
+        "文青", "攝影愛好者", "音樂愛好者", "運動愛好者", "美食愛好者",
+        "毛小孩", "寵物友善", "狗友善", "貓奴",
+        // 特殊需求
+        "無障礙", "輪椅友善", "親子友善", "寵物可入"
+    );
+    
+    // ★ 9. 排除的 URL 路徑（爬蟲跳過）
+    public static final Set<String> SKIP_URL_PATHS = Set.of(
+        "/login", "/signup", "/register", "/auth",
+        "/cart", "/checkout", "/payment",
+        "/account", "/profile", "/settings",
+        "/admin", "/dashboard",
+        "/api/", "/static/", "/assets/", "/images/",
+        "/privacy", "/terms", "/policy", "/about", "/contact",
+        "/faq", "/help", "/support",
+        "/tag/", "/category/", "/archive/"
+    );
+    
+    // ★ 10. 高品質內容指標（用於評分加成）
+    public static final Set<String> QUALITY_INDICATORS = Set.of(
+        // 有具體資訊
+        "地點", "地址", "時間", "日期", "票價", "費用",
+        "主辦", "協辦", "報名", "購票連結",
+        // 有詳細說明
+        "活動介紹", "活動內容", "節目表", "演出陣容",
+        "交通資訊", "停車資訊", "注意事項"
+    );
+    
+    // ★ 11. 新北市行政區座標（擴充 DISTRICT_COORDS）
+    public static final Map<String, double[]> NEW_TAIPEI_DISTRICT_COORDS = Map.ofEntries(
+        Map.entry("板橋區", new double[]{25.0146, 121.4593}),
+        Map.entry("三重區", new double[]{25.0615, 121.4885}),
+        Map.entry("中和區", new double[]{24.9991, 121.4989}),
+        Map.entry("永和區", new double[]{25.0074, 121.5160}),
+        Map.entry("新莊區", new double[]{25.0359, 121.4504}),
+        Map.entry("新店區", new double[]{24.9676, 121.5419}),
+        Map.entry("淡水區", new double[]{25.1696, 121.4407}),
+        Map.entry("汐止區", new double[]{25.0676, 121.6575}),
+        Map.entry("樹林區", new double[]{24.9904, 121.4205}),
+        Map.entry("鶯歌區", new double[]{24.9554, 121.3545}),
+        Map.entry("三峽區", new double[]{24.9340, 121.3687}),
+        Map.entry("林口區", new double[]{25.0775, 121.3912}),
+        Map.entry("蘆洲區", new double[]{25.0850, 121.4734}),
+        Map.entry("五股區", new double[]{25.0829, 121.4380}),
+        Map.entry("泰山區", new double[]{25.0593, 121.4308}),
+        Map.entry("土城區", new double[]{24.9725, 121.4432})
+    );
+    
+    // ★ 12. 常見活動主辦單位（用於辨識可信度）
+    public static final Set<String> KNOWN_ORGANIZERS = Set.of(
+        // 政府單位
+        "文化部", "觀光局", "觀傳局", "文化局", "教育局", "體育局",
+        "台北市政府", "新北市政府", "台中市政府", "高雄市政府",
+        // 知名主辦
+        "超級圓頂", "必應創造", "華研國際", "相信音樂", "環球音樂",
+        "LiveNation", "KKTIX", "Accupass", "寬宏藝術",
+        // 場館
+        "華山1914", "松山文創", "誠品", "北美館", "故宮", "兩廳院"
+    );
+    
+    // ★ 13. TF-IDF 停用詞擴充
+    public static final Set<String> STOPWORDS_EXTENDED = Set.of(
+        // 中文停用詞
+        "的", "了", "是", "在", "我", "有", "和", "就", "不", "人", "都", "一", "一個",
+        "上", "也", "很", "到", "說", "要", "去", "你", "會", "著", "沒有", "看", "好",
+        "自己", "這", "那", "他", "她", "它", "這個", "那個", "什麼", "怎麼", "為什麼",
+        "可以", "可能", "應該", "需要", "想要", "喜歡", "覺得", "知道", "希望",
+        // 網頁常見詞
+        "首頁", "登入", "註冊", "更多", "詳情", "點擊", "查看", "分享", "按讚",
+        "Facebook", "LINE", "Instagram", "Twitter", "複製連結",
+        // 時間通用詞
+        "年", "月", "日", "號", "時", "分", "秒", "點"
+    );
+    
+    // ==================== 🆕 工具方法擴充 ====================
+    
+    /**
+     * 判斷是否為售票平台
+     */
+    public static boolean isTicketingPlatform(String domain) {
+        if (domain == null) return false;
+        String lower = domain.toLowerCase();
+        return TICKETING_PLATFORMS.keySet().stream()
+            .anyMatch(lower::contains);
+    }
+    
+    /**
+     * 取得售票平台名稱
+     */
+    public static String getTicketingPlatformName(String domain) {
+        if (domain == null) return null;
+        String lower = domain.toLowerCase();
+        for (Map.Entry<String, String> entry : TICKETING_PLATFORMS.entrySet()) {
+            if (lower.contains(entry.getKey())) {
+                return entry.getValue();
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * 判斷是否為免費活動
+     */
+    public static boolean isFreeEvent(String text) {
+        if (text == null) return false;
+        return FREE_KEYWORDS.stream().anyMatch(text::contains);
+    }
+    
+    /**
+     * 計算活動規模加成
+     */
+    public static double getEventScaleBoost(String text) {
+        if (text == null) return 1.0;
+        double boost = 1.0;
+        for (Map.Entry<String, Double> entry : EVENT_SCALE_BOOST.entrySet()) {
+            if (text.contains(entry.getKey())) {
+                boost = Math.max(boost, entry.getValue());
+            }
+        }
+        return boost;
+    }
+    
+    /**
+     * 計算內容品質分數
+     */
+    public static int getQualityScore(String text) {
+        if (text == null) return 0;
+        int score = 0;
+        for (String indicator : QUALITY_INDICATORS) {
+            if (text.contains(indicator)) {
+                score += 5;
+            }
+        }
+        return Math.min(score, 50); // 上限 50 分
+    }
+    
+    /**
+     * 判斷是否為已知主辦單位
+     */
+    public static boolean isKnownOrganizer(String text) {
+        if (text == null) return false;
+        return KNOWN_ORGANIZERS.stream().anyMatch(text::contains);
+    }
+    
+    /**
+     * 取得節日日期範圍
+     */
+    public static int[] getHolidayDateRange(String keyword) {
+        if (keyword == null) return null;
+        for (Map.Entry<String, int[]> entry : HOLIDAY_DATES.entrySet()) {
+            if (keyword.contains(entry.getKey())) {
+                return entry.getValue();
+            }
+        }
+        return null;
+    }
 }
