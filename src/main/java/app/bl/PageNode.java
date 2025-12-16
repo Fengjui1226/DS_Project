@@ -23,6 +23,13 @@ public class PageNode {
     private LocalDate eventDate;
     private Map<Keyword, Integer> tf;
     private List<String> tokens;
+
+    private String district;
+    private Double lat;
+    private Double lng;
+
+    
+
     
     // 分數相關
     private double score = 0.0;           // 自身分數

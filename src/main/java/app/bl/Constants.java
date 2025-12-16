@@ -35,6 +35,20 @@ public final class Constants {
         "苗栗", "彰化", "南投", "雲林", "嘉義", "屏東", "宜蘭", "花蓮", "台東",
         "澎湖", "金門", "馬祖"
     );
+    
+
+    // 台北市常用行政區的大概中心點（lat, lng）
+public static final Map<String, double[]> DISTRICT_COORDS = Map.ofEntries(
+    Map.entry("信義區", new double[]{25.0328, 121.5680}),
+    Map.entry("大安區", new double[]{25.0260, 121.5430}),
+    Map.entry("中正區", new double[]{25.0326, 121.5198}),
+    Map.entry("松山區", new double[]{25.0571, 121.5570}),
+    Map.entry("萬華區", new double[]{25.0260, 121.4973}),
+    Map.entry("內湖區", new double[]{25.0830, 121.5750}),
+    Map.entry("士林區", new double[]{25.0928, 121.5246}),
+    Map.entry("文山區", new double[]{24.9889, 121.5703})
+    // 之後要加新北、其他縣市的也可以慢慢擴充
+);
 
     // ==================== 場館相關 (保持不變) ====================
     public static final Map<String, String> VENUE_CITY = Map.ofEntries(
@@ -251,7 +265,7 @@ public final class Constants {
         // ★ 已移除：facebook.com, instagram.com（改由 snippet 提供內容）
     );
     
-    // ★ 新增：社群平台域名（爬蟲會失敗，但 snippet 可用）
+    // ★ 新增：社群平台域名（爬蟲會失敗，但 snippet 可用）讚讚
     public static final Set<String> SOCIAL_DOMAINS = Set.of(
         "instagram.com", "facebook.com", "threads.net", "fb.com"
     );
@@ -298,11 +312,26 @@ public final class Constants {
     }
 
     public static boolean hasTaiwanLocation(String text) {
-        if (text == null) return false;
-        if (text.contains("台灣") || text.contains("台北")) return true;
-        return extractCity(text) != null;
+    if (text == null) return false;
+    if (text.contains("台灣") || text.contains("臺灣")) return true;
+    if (extractCity(text) != null) return true;
+    for (String landmark : TAIWAN_LANDMARKS) {
+        if (text.contains(landmark)) return true;
     }
+    return false;
+}
     
+
+    public static String extractDistrict(String text) {
+    if (text == null) return null;
+    for (String district : DISTRICT_COORDS.keySet()) {
+        if (text.contains(district)) {
+            return district;
+        }
+    }
+    return null;
+}
+
     public static boolean isLikelyForeign(String text) {
         if (text == null) return false;
         if (hasTaiwanLocation(text)) return false;
