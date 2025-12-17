@@ -72,7 +72,7 @@ public class SimpleServer {
         server.start();
         
         System.out.println("╔═══════════════════════════════════════════════════╗");
-        System.out.println("║     🎪 EventFinder API Server v3.0               ║");
+        System.out.println("║     🎪 EventFinder API Server                     ║");
         System.out.println("╠═══════════════════════════════════════════════════╣");
         System.out.println("║  Status:  ✅ Running                              ║");
         System.out.println("║  Port:    " + PORT + "                                    ║");
@@ -84,6 +84,16 @@ public class SimpleServer {
         System.out.println("║  • /api/subpages     子網頁詳情                   ║");
         System.out.println("║  • /api/categories   分類列表                     ║");
         System.out.println("╚═══════════════════════════════════════════════════╝");
+        System.out.println();
+        System.out.println("  ⠀⠀  ⡠⠒⢄  ⠀⠀   ᨘ⡴⠒⢦⣀⠔⠒⢄");
+        System.out.println("  ⠀⠀ ⡏  ⠀ ⠉⠉⠉⣽⠀⢴⣷⠛⢲⠶⠚⣄");
+        System.out.println("  ⠀⠀ ⢸ ⠀⠀⠀  ⠀⠀⠓⠚⠛⠤⡞⠛⠀⡞");
+        System.out.println("   ⠀⠀⢸ ⠀⠀⠀⠀⠀⠀⠀ ⠀⠀⠀ᱸ⠉⢉⣇⣀⣀");
+        System.out.println("    ⠉⠉⣇⡀   ⣶⠀⠀  ⣀⠀⠀  ⣶⠀⠀⣾⠤⠤");
+        System.out.println("   ⢎ ⠡⠨ ⣃⡀ ⠀⠀⠀⠉⠀⠀⠀      ⡸⠒⠒");
+        System.out.println("     ⢸⢴⠉⠂⣘ᱸ⠖⢶⠒⠒⡶⢲⠒⡞⢣");
+        System.out.println("  ⠀ ᱸ⠢⣉⣁⠜⠒⢄  ⠉⠉⠀⡠⠋⠉⠉");
+        System.out.println("  ⠀⠀               ⠑⠒⠓⠒ᱸ");
     }
 
     private static boolean checkRateLimit(HttpExchange ex) {
