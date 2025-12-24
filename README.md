@@ -164,7 +164,7 @@ if (eventDate.isBefore(today)) {
 
 ---
 
-## 📅 日期解析功能
+## 日期解析功能
 
 系統支援多種日期格式的自動解析：
 
@@ -202,8 +202,8 @@ int adYear = rocYear + 1911;  // 114 + 1911 = 2025
 #### 1. Clone 專案
 
 ```bash
-git clone https://github.com/your-username/eventfinder.git
-cd eventfinder
+git clone [https://github.com/your-username/eventfinder.git](https://github.com/Fengjui1226/DS_Project.git)
+cd DS_Project
 ```
 
 #### 2. 設定 Google API Key
@@ -337,19 +337,6 @@ GET /api/search?query={關鍵字}&city={城市}&page={頁碼}
 
 ---
 
-## 📸 畫面截圖
-
-### 首頁搜尋
-![首頁](docs/screenshots/home.png)
-
-### 搜尋結果
-![搜尋結果](docs/screenshots/results.png)
-
-### 推薦搜尋
-![推薦搜尋](docs/screenshots/related.png)
-
----
-
 ## 測試
 
 ```bash
@@ -365,7 +352,10 @@ curl "http://localhost:8080/api/health"
 ## 👥 開發團隊
 
 - **劉豐睿** - 國立政治大學 資訊管理學系
-- **鄭子誼** - 國立政治大學 地政學系（雙主修資訊管理學系） 
+- **鄭子誼** - 國立政治大學 地政學系（雙主修資訊管理學系）
+- **何凱榆** - 國立政治大學 資訊管理學系
+- **林宣岑** - 國立政治大學 資訊管理學系
+- **許伃萱** - 國立政治大學 資訊管理學系
 
 ---
 
