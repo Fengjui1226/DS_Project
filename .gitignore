@@ -1,8 +1,41 @@
-/bin/
-/out/
-/target/
-.classpath
-.project
-.settings/
+# ==================== Java ====================
+target/
+out/
+bin/
+*.class
+*.jar
+*.war
+hs_err_pid*.log
+
+# ==================== Maven ====================
+.mvn/
+mvnw
+mvnw.cmd
+
+# ==================== IDE ====================
+.idea/
+*.iml
 .vscode/
+.project
+.classpath
+.settings/
+
+# ==================== Node.js ====================
+node_modules/
+dist/
+.vite/
+
+# ==================== Environment ====================
+.env
+.env.local
+*.env
+
+# ==================== OS ====================
 .DS_Store
+__MACOSX/
+Thumbs.db
+
+# ==================== Misc ====================
+*.zip
+*.log
+FETCH_HEAD
