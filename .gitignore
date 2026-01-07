@@ -39,3 +39,5 @@ Thumbs.db
 *.zip
 *.log
 FETCH_HEAD
+*.log
+lib/
