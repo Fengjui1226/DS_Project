@@ -13,14 +13,18 @@ export const translations = {
     
     // 分類
     categories: {
-      music: '音樂',
-      art: '展覽',
       market: '市集',
-      outdoor: '戶外',
+      art: '展覽',
+      concert: '演唱會',
+      festival: '音樂節',
+      lecture: '講座',
+      workshop: '工作坊',
       family: '親子',
-      sports: '運動',
+      outdoor: '戶外',
       food: '美食',
-      tech: '科技'
+      sports: '運動',
+      pet: '寵物',
+      celebration: '節慶'
     },
     
     // 結果
@@ -115,14 +119,18 @@ export const translations = {
     searching: 'Searching...',
     
     categories: {
-      music: 'Music',
-      art: 'Art',
       market: 'Market',
-      outdoor: 'Outdoor',
+      art: 'Exhibition',
+      concert: 'Concert',
+      festival: 'Music Festival',
+      lecture: 'Lecture',
+      workshop: 'Workshop',
       family: 'Family',
-      sports: 'Sports',
+      outdoor: 'Outdoor',
       food: 'Food',
-      tech: 'Tech'
+      sports: 'Sports',
+      pet: 'Pet',
+      celebration: 'Festival'
     },
     
     results: 'Search Results',
@@ -207,14 +215,18 @@ export const translations = {
     searching: '検索中...',
     
     categories: {
-      music: '音楽',
-      art: '展示',
       market: 'マーケット',
-      outdoor: 'アウトドア',
+      art: '展示',
+      concert: 'コンサート',
+      festival: '音楽祭',
+      lecture: '講座',
+      workshop: 'ワークショップ',
       family: 'ファミリー',
-      sports: 'スポーツ',
+      outdoor: 'アウトドア',
       food: 'グルメ',
-      tech: 'テック'
+      sports: 'スポーツ',
+      pet: 'ペット',
+      celebration: 'お祭り'
     },
     
     results: '検索結果',
@@ -299,14 +311,18 @@ export const translations = {
     searching: '검색 중...',
     
     categories: {
-      music: '음악',
-      art: '전시',
       market: '마켓',
-      outdoor: '야외',
+      art: '전시',
+      concert: '콘서트',
+      festival: '음악 페스티벌',
+      lecture: '강연',
+      workshop: '워크숍',
       family: '가족',
-      sports: '스포츠',
+      outdoor: '야외',
       food: '음식',
-      tech: '기술'
+      sports: '스포츠',
+      pet: '애완동물',
+      celebration: '축제'
     },
     
     results: '검색 결과',

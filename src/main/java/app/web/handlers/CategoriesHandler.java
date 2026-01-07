@@ -32,19 +32,32 @@ public class CategoriesHandler implements HttpHandler {
         JsonObject root = new JsonObject();
         root.addProperty("success", true);
         JsonArray arr = new JsonArray();
-        arr.add("市集");
-        arr.add("展覽");
-        arr.add("演唱會");
-        arr.add("音樂節");
-        arr.add("講座");
-        arr.add("工作坊");
-        arr.add("親子");
-        arr.add("戶外");
-        arr.add("美食");
-        arr.add("運動");
-        arr.add("寵物");
-        arr.add("節慶");
+
+        // 添加分類，每個分類包含 id, name, query, icon, color
+        arr.add(createCategory("market", "市集", "市集", "🛍️", "#FF6B6B"));
+        arr.add(createCategory("art", "展覽", "展覽", "🎨", "#4ECDC4"));
+        arr.add(createCategory("concert", "演唱會", "演唱會", "🎤", "#95E1D3"));
+        arr.add(createCategory("festival", "音樂節", "音樂節", "🎵", "#F38181"));
+        arr.add(createCategory("lecture", "講座", "講座", "📚", "#AA96DA"));
+        arr.add(createCategory("workshop", "工作坊", "工作坊", "🛠️", "#FCBAD3"));
+        arr.add(createCategory("family", "親子", "親子", "👨‍👩‍👧‍👦", "#FFFFD2"));
+        arr.add(createCategory("outdoor", "戶外", "戶外", "🏕️", "#A8D8EA"));
+        arr.add(createCategory("food", "美食", "美食", "🍜", "#FFD93D"));
+        arr.add(createCategory("sports", "運動", "運動", "⚽", "#6BCB77"));
+        arr.add(createCategory("pet", "寵物", "寵物", "🐾", "#FDA7DF"));
+        arr.add(createCategory("celebration", "節慶", "節慶", "🎊", "#E4A5FF"));
+
         root.add("categories", arr);
         HttpUtil.sendJson(ex, ctx, 200, root.toString());
+    }
+
+    private JsonObject createCategory(String id, String name, String query, String icon, String color) {
+        JsonObject cat = new JsonObject();
+        cat.addProperty("id", id);
+        cat.addProperty("name", name);
+        cat.addProperty("query", query);
+        cat.addProperty("icon", icon);
+        cat.addProperty("color", color);
+        return cat;
     }
 }
