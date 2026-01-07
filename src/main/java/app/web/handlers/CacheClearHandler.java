@@ -11,6 +11,10 @@ import app.bl.Logger;
 import app.web.HttpUtil;
 import app.web.ServerContext;
 
+/**
+ * CacheClearHandler
+ * POST /api/cache/clear
+ */
 public class CacheClearHandler implements HttpHandler {
 
     private final ServerContext ctx;
@@ -19,7 +23,9 @@ public class CacheClearHandler implements HttpHandler {
         this.ctx = ctx;
     }
 
+    @Override
     public void handle(HttpExchange ex) throws IOException {
+        // CORS preflight
         if (HttpUtil.handleOptions(ex, ctx)) return;
 
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {

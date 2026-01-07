@@ -20,6 +20,10 @@ import app.web.JsonUtil;
 import app.web.ServerContext;
 import app.web.SessionManager;
 
+/**
+ * SearchHandler 負責處理搜尋請求 (/api/search).
+ * 接收 query 和 city 參數，返回包含搜尋結果的 JSON。
+ */
 public class SearchHandler implements HttpHandler {
 
     private final ServerContext ctx;
@@ -28,140 +32,113 @@ public class SearchHandler implements HttpHandler {
         this.ctx = ctx;
     }
 
+    @Override
     public void handle(HttpExchange ex) throws IOException {
-        if (HttpUtil.handleOptions(ex, ctx)) return;
-
+        // 處理 CORS 的 OPTIONS 預檢請求
+        if (HttpUtil.handleOptions(ex, ctx)) {
+            return;
+        }
+        // 若伺服器正處於關閉狀態，不再接受新請求
         if (ctx.isShuttingDown.get()) {
             HttpUtil.sendError(ex, ctx, 503, "伺服器正在關閉中");
             return;
         }
-
+        // 檢查是否觸發每 IP 限流
         if (!ctx.rateLimiter.allow(ex)) {
-            HttpUtil.sendError(ex, ctx, 429, "請求太頻繁，請稍後再試");
+            HttpUtil.sendError(ex, ctx, 429, "請求過於頻繁，請稍後再試");
             return;
         }
 
         long startTime = System.currentTimeMillis();
-
         try {
+            // 解析查詢參數
             Map<String, String> params = HttpUtil.parseQuery(ex.getRequestURI().getQuery());
-
-            InputValidator.ValidationResult queryResult =
-                    InputValidator.validateQuery(getOrDefault(params, "query", ""));
-            if (!queryResult.valid) {
-                HttpUtil.sendError(ex, ctx, 400, queryResult.message);
+            // 驗證並取得查詢參數
+            InputValidator.ValidationResult queryVal = InputValidator.validateQuery(params.getOrDefault("query", ""));
+            if (!queryVal.valid) {
+                HttpUtil.sendError(ex, ctx, 400, queryVal.message);
+                return;
+            }
+            InputValidator.ValidationResult cityVal = InputValidator.validateCity(params.getOrDefault("city", ""));
+            if (!cityVal.valid) {
+                HttpUtil.sendError(ex, ctx, 400, cityVal.message);
                 return;
             }
 
-            InputValidator.ValidationResult cityResult =
-                    InputValidator.validateCity(getOrDefault(params, "city", ""));
-            if (!cityResult.valid) {
-                HttpUtil.sendError(ex, ctx, 400, cityResult.message);
-                return;
-            }
-
-            String query = queryResult.sanitizedValue;
-            String city = cityResult.sanitizedValue;
+            String query = queryVal.sanitizedValue;
+            String city = cityVal.sanitizedValue;
             int page = InputValidator.validatePage(params.get("page"), 1);
 
-            // 快取
+            // 快取查詢：如快取存在則直接返回結果並標記 cached=true
             String cacheKey = CacheManager.buildKey(query, city, page);
-            String cached = CacheManager.get(cacheKey);
-            if (cached != null) {
-                Logger.debug("快取命中: %s", cacheKey);
-                HttpUtil.sendJson(ex, ctx, 200, JsonUtil.markCachedTrue(cached));
+            String cachedJson = CacheManager.get(cacheKey);
+            if (cachedJson != null) {
+                Logger.debug("快取命中: " + cacheKey);
+                // 標記快取命中並直接回傳
+                String cachedResponse = JsonUtil.markCachedTrue(cachedJson);
+                HttpUtil.sendJson(ex, ctx, 200, cachedResponse);
                 return;
             }
 
-            // Session（避免多人互撞）
+            // 建立 Session（以 IP 區分）避免多用戶交叉影響
             SessionManager.Session session = ctx.sessionManager.getSession(ex);
-            session.profile.setUserCity(city);
+            session.profile.setUserCity(city);  // 設定使用者偏好的城市
             session.lastQuery = query;
 
-            // 搜尋
-            List<PageNode> results = SearchEngine.search(query, session.profile);
-            session.lastResults = results;
+            // 執行搜尋邏輯
+            List<PageNode> allResults = SearchEngine.search(query, session.profile);
+            session.lastResults = allResults;  // 暫存結果於 Session 供後續使用
 
-            // 分頁
+            // 處理分頁邏輯
             int pageSize = 10;
-            int totalCount = results.size();
-            int totalPages = (int) Math.ceil((double) totalCount / pageSize);
-            int start = (page - 1) * pageSize;
-            int end = Math.min(start + pageSize, totalCount);
-
-            List<PageNode> pageResults = (start < totalCount)
-                    ? results.subList(start, end)
-                    : new ArrayList<PageNode>();
+            int totalCount = allResults.size();
+            int totalPages = (int) Math.ceil(totalCount / (double) pageSize);
+            int startIndex = (page - 1) * pageSize;
+            int endIndex = Math.min(startIndex + pageSize, totalCount);
+            List<PageNode> pageResults = (startIndex < totalCount) 
+                    ? allResults.subList(startIndex, endIndex)
+                    : new ArrayList<>();
 
             long duration = System.currentTimeMillis() - startTime;
 
-            String json = buildSearchResponse(query, city, page, totalCount, totalPages, pageResults, duration, start, false);
+            // 構建回傳的 JSON 結構
+            JsonObject root = new JsonObject();
+            root.addProperty("success", true);
+            root.addProperty("query", query);
+            root.addProperty("city", city);
+            root.addProperty("page", page);
+            root.addProperty("totalCount", totalCount);
+            root.addProperty("totalPages", totalPages);
+            root.addProperty("responseTime", duration);
+            root.addProperty("cached", false);
 
-            CacheManager.put(cacheKey, json);
-            HttpUtil.sendJson(ex, ctx, 200, json);
+            JsonArray resultsArr = new JsonArray();
+            int rank = startIndex + 1;
+            for (PageNode p : pageResults) {
+                JsonObject obj = new JsonObject();
+                obj.addProperty("rank", rank++);
+                obj.addProperty("title", JsonUtil.safe(p.getTitle()));
+                obj.addProperty("url", JsonUtil.safe(p.getUrl()));
+                obj.addProperty("domain", JsonUtil.safe(p.getDomain()));
+                obj.addProperty("score", JsonUtil.round1(p.getTotalScore()));
+                obj.addProperty("subPageCount", p.getSubPageCount());
+                obj.addProperty("city", JsonUtil.safe(p.getCity()));
+                obj.addProperty("eventDate", p.getEventDate() == null ? "" : p.getEventDate().toString());
+                obj.addProperty("crawled", p.isCrawled());
+                resultsArr.add(obj);
+            }
+            root.add("results", resultsArr);
 
-            Logger.info("搜尋完成: query=\"%s\", city=\"%s\", results=%d, time=%dms",
-                    query, city, totalCount, duration);
+            // 將結果存入快取並回傳
+            String jsonResponse = root.toString();
+            CacheManager.put(cacheKey, jsonResponse);
+            HttpUtil.sendJson(ex, ctx, 200, jsonResponse);
+            Logger.info(String.format("搜尋完成: query=\"%s\", city=\"%s\", results=%d, time=%dms",
+                                       query, city, totalCount, duration));
 
         } catch (Exception e) {
-            Logger.error("搜尋錯誤", e);
-            HttpUtil.sendError(ex, ctx, 500, "搜尋發生錯誤，請稍後再試");
+            Logger.error("搜尋過程發生錯誤", e);
+            HttpUtil.sendError(ex, ctx, 500, "搜尋服務發生內部錯誤，請稍後再試");
         }
-    }
-
-    private static String getOrDefault(Map<String, String> map, String key, String def) {
-        String v = map.get(key);
-        return (v == null) ? def : v;
-    }
-
-    private static String buildSearchResponse(String query, String city, int page,
-                                              int totalCount, int totalPages,
-                                              List<PageNode> pageResults,
-                                              long duration, int startRank, boolean cached) {
-
-        JsonObject root = new JsonObject();
-        root.addProperty("success", true);
-        root.addProperty("query", query);
-        root.addProperty("city", city);
-        root.addProperty("page", page);
-        root.addProperty("totalCount", totalCount);
-        root.addProperty("totalPages", totalPages);
-        root.addProperty("responseTime", duration);
-        root.addProperty("cached", cached);
-
-        JsonArray arr = new JsonArray();
-        int rank = startRank + 1;
-
-        for (int i = 0; i < pageResults.size(); i++) {
-            PageNode p = pageResults.get(i);
-
-            JsonObject o = new JsonObject();
-            o.addProperty("rank", rank++);
-            o.addProperty("title", safe(p.getTitle()));
-            o.addProperty("url", safe(p.getUrl()));
-            o.addProperty("domain", safe(p.getDomain()));
-            o.addProperty("score", round1(p.getTotalScore()));
-            o.addProperty("subPageCount", p.getSubPageCount());
-
-            String pc = p.getCity();
-            o.addProperty("city", pc == null ? "" : pc);
-
-            o.addProperty("eventDate", p.getEventDate() == null ? "" : p.getEventDate().toString());
-            o.addProperty("crawled", p.isCrawled());
-
-            arr.add(o);
-        }
-
-        root.add("results", arr);
-        return root.toString();
-    }
-
-    private static String safe(String s) {
-        return s == null ? "" : s;
-    }
-
-    private static double round1(double x) {
-        // 只保留 1 位小數（避免 String.format 造成 locale 問題）
-        return Math.round(x * 10.0) / 10.0;
     }
 }
