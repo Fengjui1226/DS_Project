@@ -1,44 +1,44 @@
 #!/bin/bash
-# EventFinder 一键部署脚本
+# EventFinder 一鍵部署腳本
 
 set -e
 
 echo "========================================="
-echo "  EventFinder 部署脚本"
+echo "  EventFinder 部署腳本"
 echo "========================================="
 echo ""
 
-# 颜色定义
+# 顏色定義
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# 检查依赖
+# 檢查依賴
 check_dependencies() {
-    echo "检查依赖..."
+    echo "檢查依賴..."
 
     if ! command -v docker &> /dev/null; then
-        echo -e "${RED}❌ Docker未安装${NC}"
+        echo -e "${RED}❌ Docker未安裝${NC}"
         exit 1
     fi
 
     if ! command -v docker-compose &> /dev/null; then
-        echo -e "${RED}❌ Docker Compose未安装${NC}"
+        echo -e "${RED}❌ Docker Compose未安裝${NC}"
         exit 1
     fi
 
-    echo -e "${GREEN}✅ 依赖检查通过${NC}"
+    echo -e "${GREEN}✅ 依賴檢查通過${NC}"
 }
 
-# 编译后端
+# 編譯後端
 build_backend() {
     echo ""
-    echo "编译后端..."
+    echo "編譯後端..."
 
-    # 检查并下载依赖
+    # 檢查並下載依賴
     if [ ! -d "lib" ] || [ ! -f "lib/gson-2.10.1.jar" ]; then
-        echo "下载依赖..."
+        echo "下載依賴..."
         mkdir -p lib
         curl -L -o lib/gson-2.10.1.jar \
             https://repo1.maven.org/maven2/com/google/code/gson/gson/2.10.1/gson-2.10.1.jar
@@ -46,100 +46,100 @@ build_backend() {
             https://repo1.maven.org/maven2/org/jsoup/jsoup/1.17.2/jsoup-1.17.2.jar
     fi
 
-    # 编译
+    # 編譯
     mkdir -p target/classes
     find src/main/java -name "*.java" > /tmp/sources.txt
     javac -cp "lib/*" -d target/classes @/tmp/sources.txt
 
-    echo -e "${GREEN}✅ 后端编译完成${NC}"
+    echo -e "${GREEN}✅ 後端編譯完成${NC}"
 }
 
-# 构建前端
+# 構建前端
 build_frontend() {
     echo ""
-    echo "构建前端..."
+    echo "構建前端..."
 
     cd frontend
 
-    # 安装依赖（如果需要）
+    # 安裝依賴（如果需要）
     if [ ! -d "node_modules" ]; then
-        echo "安装依赖..."
+        echo "安裝依賴..."
         npm install
     fi
 
-    # 构建生产版本
-    echo "构建生产版本..."
+    # 構建生產版本
+    echo "構建生產版本..."
     npm run build
 
     cd ..
 
-    echo -e "${GREEN}✅ 前端构建完成${NC}"
+    echo -e "${GREEN}✅ 前端構建完成${NC}"
 }
 
-# 构建Docker镜像
+# 構建Docker鏡像
 build_docker() {
     echo ""
-    echo "构建Docker镜像..."
+    echo "構建Docker鏡像..."
 
     docker-compose build
 
-    echo -e "${GREEN}✅ Docker镜像构建完成${NC}"
+    echo -e "${GREEN}✅ Docker鏡像構建完成${NC}"
 }
 
-# 启动服务
+# 啟動服務
 start_services() {
     echo ""
-    echo "启动服务..."
+    echo "啟動服務..."
 
-    # 停止旧服务
+    # 停止舊服務
     docker-compose down 2>/dev/null || true
 
-    # 启动新服务
+    # 啟動新服務
     docker-compose up -d
 
-    echo -e "${GREEN}✅ 服务已启动${NC}"
+    echo -e "${GREEN}✅ 服務已啟動${NC}"
 }
 
-# 等待服务就绪
+# 等待服務就緒
 wait_for_services() {
     echo ""
-    echo "等待服务就绪..."
+    echo "等待服務就緒..."
 
     for i in {1..30}; do
         if curl -s http://localhost:8080/health > /dev/null 2>&1; then
-            echo -e "${GREEN}✅ 后端服务就绪${NC}"
+            echo -e "${GREEN}✅ 後端服務就緒${NC}"
             break
         fi
-        echo "等待后端启动... ($i/30)"
+        echo "等待後端啟動... ($i/30)"
         sleep 2
     done
 
     for i in {1..30}; do
         if curl -s http://localhost:80 > /dev/null 2>&1; then
-            echo -e "${GREEN}✅ 前端服务就绪${NC}"
+            echo -e "${GREEN}✅ 前端服務就緒${NC}"
             break
         fi
-        echo "等待前端启动... ($i/30)"
+        echo "等待前端啟動... ($i/30)"
         sleep 2
     done
 }
 
-# 显示状态
+# 顯示狀態
 show_status() {
     echo ""
     echo "========================================="
     echo -e "${GREEN}🎉 部署成功！${NC}"
     echo "========================================="
     echo ""
-    echo "服务地址："
+    echo "服務地址："
     echo "  前端: http://localhost"
-    echo "  后端API: http://localhost:8080"
-    echo "  健康检查: http://localhost:8080/health"
+    echo "  後端API: http://localhost:8080"
+    echo "  健康檢查: http://localhost:8080/health"
     echo ""
-    echo "查看日志："
+    echo "查看日誌："
     echo "  docker-compose logs -f"
     echo ""
-    echo "停止服务："
+    echo "停止服務："
     echo "  docker-compose down"
     echo ""
 }
@@ -173,12 +173,12 @@ case "${1:-deploy}" in
         ;;
     stop)
         docker-compose down
-        echo -e "${GREEN}✅ 服务已停止${NC}"
+        echo -e "${GREEN}✅ 服務已停止${NC}"
         ;;
     restart)
         docker-compose restart
         wait_for_services
-        echo -e "${GREEN}✅ 服务已重启${NC}"
+        echo -e "${GREEN}✅ 服務已重啟${NC}"
         ;;
     logs)
         docker-compose logs -f
