@@ -11,5 +11,32 @@ export default defineConfig({
         secure: false
       }
     }
+  },
+  build: {
+    // 生產環境優化
+    target: 'es2015',
+    minify: 'terser',
+    terserOptions: {
+      compress: {
+        drop_console: true,  // 移除console.log
+        drop_debugger: true
+      }
+    },
+    rollupOptions: {
+      output: {
+        // 代碼分割
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom']
+        },
+        // 資源命名
+        chunkFileNames: 'js/[name]-[hash].js',
+        entryFileNames: 'js/[name]-[hash].js',
+        assetFileNames: '[ext]/[name]-[hash].[ext]'
+      }
+    },
+    // 優化設置
+    chunkSizeWarningLimit: 1000,
+    sourcemap: false,  // 生產環境不生成sourcemap
+    cssCodeSplit: true
   }
 })
