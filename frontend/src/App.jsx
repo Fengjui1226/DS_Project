@@ -10,7 +10,7 @@ import LanguageSelector from './components/LanguageSelector';
 import RelatedSearches from './components/RelatedSearches';
 import './index.css';
 
-const API_BASE = '/api';
+const API_BASE = '/api'; // 你後端有向後相容 /api/*，這樣前端不用大改
 
 const cities = {
   'zh-TW': ['台北', '新北', '桃園', '台中', '台南', '高雄', '基隆', '新竹', '苗栗', '彰化', '南投', '雲林', '嘉義', '屏東', '宜蘭', '花蓮', '台東'],
@@ -68,7 +68,7 @@ export default function App() {
     const saved = localStorage.getItem('eventfinder_lang');
     return saved || 'zh-TW';
   });
-  
+
   // 視圖狀態
   const [view, setView] = useState('home');
   const [query, setQuery] = useState('');
@@ -78,12 +78,12 @@ export default function App() {
   const [error, setError] = useState(null);
   const [categories, setCategories] = useState([]);
   const [relatedSearches, setRelatedSearches] = useState([]);
-  
+
   // 分頁
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
-  
+
   // 收藏 & 歷史
   const [favorites, setFavorites] = useState(() => {
     try {
@@ -91,36 +91,34 @@ export default function App() {
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
-  
+
   const [searchHistory, setSearchHistory] = useState(() => {
     try {
       const saved = localStorage.getItem('eventfinder_history');
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
-  
+
   // 彈窗 & 建議
   const [subpageModal, setSubpageModal] = useState({ open: false, domain: '', data: null });
   const [suggestions, setSuggestions] = useState([]);
-  const [showSuggestions, setShowSuggestions] = useState([]);
-  
+  const [showSuggestions, setShowSuggestions] = useState(false); // ✅ 修正：boolean
+
   // ============ 穩定性：請求限流 ============
   const lastRequestTime = useRef(0);
   const requestCount = useRef(0);
   const RATE_LIMIT_WINDOW = 10000; // 10 秒
   const MAX_REQUESTS = 5; // 每 10 秒最多 5 次
-  
+
   const checkRateLimit = useCallback(() => {
     const now = Date.now();
     if (now - lastRequestTime.current > RATE_LIMIT_WINDOW) {
       requestCount.current = 0;
       lastRequestTime.current = now;
     }
-    
-    if (requestCount.current >= MAX_REQUESTS) {
-      return false;
-    }
-    
+
+    if (requestCount.current >= MAX_REQUESTS) return false;
+
     requestCount.current++;
     return true;
   }, []);
@@ -154,18 +152,34 @@ export default function App() {
 
   // 搜尋建議（防抖動）
   const debouncedQuery = useDebounce(query, 300);
-  
+
   useEffect(() => {
-    if (!debouncedQuery || debouncedQuery.length < 1) {
+    if (!debouncedQuery || debouncedQuery.trim().length < 1) {
       setSuggestions([]);
       return;
     }
-    
-    fetch(`${API_BASE}/suggestions?q=${encodeURIComponent(debouncedQuery)}`)
+
+    // ✅ 修正：後端吃 query，不是 q
+    fetch(`${API_BASE}/suggestions?query=${encodeURIComponent(debouncedQuery.trim())}`)
       .then(res => res.json())
       .then(data => setSuggestions(data.suggestions || []))
       .catch(() => {});
   }, [debouncedQuery]);
+
+  // 載入推薦關鍵字（Google 風格）
+  const loadRelatedSearches = useCallback(async (q, c) => {
+    try {
+      const res = await fetch(`${API_BASE}/suggestions?query=${encodeURIComponent(q)}&city=${encodeURIComponent(c)}`);
+      const data = await res.json();
+      if (data.success && data.suggestions) {
+        setRelatedSearches(data.suggestions);
+      } else {
+        setRelatedSearches([]);
+      }
+    } catch {
+      setRelatedSearches([]);
+    }
+  }, []);
 
   // ============ 搜尋功能（穩定性增強）============
   const handleSearch = async (q = query, c = city, page = 1) => {
@@ -174,25 +188,24 @@ export default function App() {
       setError(t(lang, 'errors.empty'));
       return;
     }
-    
     if (q.trim().length < 2) {
       setError(t(lang, 'errors.tooShort'));
       return;
     }
-    
+
     // 限流檢查
     if (!checkRateLimit()) {
       setError(t(lang, 'errors.rateLimit'));
       return;
     }
-    
+
     // 城市轉換（非中文轉中文）
     const apiCity = cityMapping[c] || c;
-    
+
     // 檢查快取
     const cacheKey = `${q}-${apiCity}-${page}`;
     const cachedData = getCachedResult(cacheKey);
-    
+
     if (cachedData) {
       setResults(cachedData.results);
       setTotalPages(cachedData.totalPages);
@@ -202,52 +215,58 @@ export default function App() {
       setCurrentPage(page);
       setView('results');
       setError(null);
-      loadSemantic();
-      loadTree();
+      setShowSuggestions(false);
+
+      // ✅ 修正：這兩個可能不存在，避免炸掉
+      if (typeof window.loadSemantic === 'function') window.loadSemantic();
+      if (typeof window.loadTree === 'function') window.loadTree();
+
+      // ✅ 修正：cache 命中也載入 relatedSearches，體感一致
+      loadRelatedSearches(q, apiCity);
       return;
     }
-    
+
     setLoading(true);
     setError(null);
     setQuery(q);
     setCity(c);
     setCurrentPage(page);
     setShowSuggestions(false);
-    
+
     // 更新搜尋歷史
     const newHistory = [q, ...searchHistory.filter(h => h !== q)].slice(0, 10);
     setSearchHistory(newHistory);
-    
+
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 150000); // ★ 15 秒超時
-      
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // ✅ 15 秒
+
       const res = await fetch(
         `${API_BASE}/search?query=${encodeURIComponent(q)}&city=${encodeURIComponent(apiCity)}&page=${page}`,
         { signal: controller.signal }
       );
-      
+
       clearTimeout(timeoutId);
-      
+
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
-      
+
       const data = await res.json();
-      
+
       if (data.success) {
         setResults(data.results || []);
         setTotalPages(data.totalPages || 1);
         setTotalCount(data.totalCount || 0);
         setView('results');
-        
+
         // 存入快取
         setCachedResult(cacheKey, {
           results: data.results || [],
           totalPages: data.totalPages || 1,
           totalCount: data.totalCount || 0
         });
-        
+
         // 載入推薦關鍵字
         loadRelatedSearches(q, apiCity);
       } else {
@@ -255,10 +274,10 @@ export default function App() {
       }
     } catch (err) {
       console.error('Search error:', err);
-      
+
       if (err.name === 'AbortError') {
         setError(t(lang, 'errors.server'));
-      } else if (err.message.includes('fetch')) {
+      } else if (String(err.message || '').includes('fetch')) {
         setError(t(lang, 'errors.network'));
       } else {
         setError(t(lang, 'errors.unknown'));
@@ -268,24 +287,15 @@ export default function App() {
     }
   };
 
-  // 載入推薦關鍵字（Google 風格）
-  const loadRelatedSearches = async (q, c) => {
-    try {
-      const res = await fetch(`${API_BASE}/suggestions?query=${encodeURIComponent(q)}&city=${encodeURIComponent(c)}`);
-      const data = await res.json();
-      if (data.success && data.suggestions) {
-        setRelatedSearches(data.suggestions);
-      }
-    } catch {}
-  };
+  // 子網頁查詢（✅ 修正：後端要 url）
+  const handleSubpageQuery = async (url, domainLabel = '') => {
+    if (!url) return;
 
-  // 子網頁查詢
-  const handleSubpageQuery = async (domain) => {
     try {
-      const res = await fetch(`${API_BASE}/subpages?domain=${encodeURIComponent(domain)}`);
+      const res = await fetch(`${API_BASE}/subpages?url=${encodeURIComponent(url)}`);
       const data = await res.json();
       if (data.success) {
-        setSubpageModal({ open: true, domain, data });
+        setSubpageModal({ open: true, domain: domainLabel || url, data });
       }
     } catch {}
   };
@@ -338,14 +348,13 @@ export default function App() {
     return (
       <div className="app">
         <div className="bg" />
-        
-        {/* 語言選擇器 */}
-        <LanguageSelector 
-          lang={lang} 
+
+        <LanguageSelector
+          lang={lang}
           onChange={handleLanguageChange}
           T={T}
         />
-        
+
         <div className="home animate-fade-in">
           <div className="brand">
             <div className="logo">🎪</div>
@@ -356,8 +365,8 @@ export default function App() {
           <div className="search-card glass">
             <div className="categories">
               {categories.map(cat => (
-                <button 
-                  key={cat.id} 
+                <button
+                  key={cat.id}
                   className="cat-btn"
                   style={{ '--cat-color': cat.color }}
                   onClick={() => handleSearch(cat.query, city)}
@@ -384,10 +393,10 @@ export default function App() {
             />
 
             {error && <div className="error animate-shake">⚠️ {error}</div>}
-            
+
             {searchHistory.length > 0 && (
-              <SearchHistory 
-                history={searchHistory} 
+              <SearchHistory
+                history={searchHistory}
                 onSelect={(q) => handleSearch(q, city)}
                 onClear={clearHistory}
                 T={T}
@@ -436,13 +445,13 @@ export default function App() {
   return (
     <div className="app">
       <div className="bg" />
-      
+
       <header className="header glass">
         <div className="header-brand" onClick={() => setView('home')}>
           <span className="header-logo">🎪</span>
           <span className="header-title">{T('brand')}</span>
         </div>
-        
+
         <SearchBar
           query={query}
           setQuery={setQuery}
@@ -458,9 +467,9 @@ export default function App() {
           setShowSuggestions={setShowSuggestions}
           T={T}
         />
-        
-        <LanguageSelector 
-          lang={lang} 
+
+        <LanguageSelector
+          lang={lang}
           onChange={handleLanguageChange}
           T={T}
           compact
@@ -472,8 +481,8 @@ export default function App() {
           <div className="results-header animate-fade-in">
             <h2>{T('results')}</h2>
             <p>
-              {T('keyword')}：<strong>{query}</strong> | 
-              {T('city')}：<strong>{city}</strong> | 
+              {T('keyword')}：<strong>{query}</strong> |
+              {T('city')}：<strong>{city}</strong> |
               {T('total')} <strong>{totalCount}</strong> {T('items')}
             </p>
           </div>
@@ -497,13 +506,13 @@ export default function App() {
 
           <div className="results-list">
             {results.map((r, index) => (
-              <ResultCard 
-                key={r.rank} 
+              <ResultCard
+                key={`${r.rank}-${r.url}`}
                 result={r}
                 index={index}
                 isFavorite={isFavorite(r.url)}
                 onToggleFavorite={() => toggleFavorite(r)}
-                onSubpageQuery={() => handleSubpageQuery(r.domain)}
+                onSubpageQuery={(url) => handleSubpageQuery(url, r.domain)}
                 T={T}
               />
             ))}
@@ -518,15 +527,14 @@ export default function App() {
             />
           )}
 
-          {/* Google 風格的推薦搜尋 */}
-          <RelatedSearches 
+          <RelatedSearches
             suggestions={relatedSearches}
             onSearch={(kw) => handleSearch(kw, city)}
             T={T}
           />
         </div>
 
-        <Sidebar 
+        <Sidebar
           favorites={favorites}
           onFavoriteRemove={(url) => setFavorites(favorites.filter(f => f.url !== url))}
           T={T}
