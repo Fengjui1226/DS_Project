@@ -1,185 +1,119 @@
-# 🎪 EventFinder - 全台活動搜尋引擎
+# 🎪 EventFinder - 台灣活動搜尋引擎
 
-> 一個專為台灣設計的活動搜尋引擎，幫助使用者快速找到展覽、市集、演唱會等各類活動資訊。
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Java](https://img.shields.io/badge/Java-17-orange.svg)](https://openjdk.org/)
+[![React](https://img.shields.io/badge/React-18.2-blue.svg)](https://reactjs.org/)
 
-[![Java](https://img.shields.io/badge/Java-17+-orange.svg)](https://openjdk.java.net/)
-[![React](https://img.shields.io/badge/React-18-blue.svg)](https://reactjs.org/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+探索台灣精彩活動，音樂會、展覽、市集、戶外活動一網打盡！
 
----
+## ✨ 功能特色
 
-## 專案簡介
+- 🔍 **智能搜尋** - AI驅動的相關性排序
+- 🏙️ **城市篩選** - 支援全台17個主要城市  
+- 🎨 **12大分類** - 市集、展覽、演唱會、音樂節等
+- 🌏 **多語言** - 支援繁中、英文、日文、韓文
+- ⚡ **即時過濾** - 自動排除過期活動
+- 📱 **響應式設計** - 完美支援桌面和移動設備
+- ❤️ **收藏功能** - 保存喜歡的活動
+- 🎯 **定位優先** - 基於地理位置的智能排序
 
-EventFinder 是一個結合 **Google Custom Search API** 與**自定義排名演算法**的活動搜尋引擎。系統會自動爬取、分析網頁內容，並根據活動日期、地點相關性、內容品質等多種因素進行智慧排名，讓使用者能快速找到最相關且尚未過期的活動。
+## 🚀 快速開始
 
-### 核心特色
+### 使用 Docker（推薦）
 
-- 🔍 **智慧搜尋**：自動優化查詢關鍵字，提升搜尋精準度
-- 📅 **日期過濾**：自動辨識活動日期，過濾已結束的活動
-- 📍 **城市定位**：支援 GPS 定位，優先顯示附近活動
-- 📊 **TF-IDF 排名**：結合文字相關度與多重因素的排名演算法
-- 🌐 **多語系支援**：支援中文、英文、日文、韓文介面
-- ⚡ **效能優化**：平行爬蟲、快取機制、限流保護
-
----
-
-## 系統架構
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Frontend (React)                         │
-│                     localhost:3000                              │
-├─────────────────────────────────────────────────────────────────┤
-│  SearchBar │ ResultCard │ Sidebar │ Pagination │ i18n          │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                        HTTP / JSON
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        Backend (Java)                           │
-│                     localhost:8080                              │
-├─────────────────────────────────────────────────────────────────┤
-│  SimpleServer (HTTP Server)                                     │
-│       │                                                         │
-│       ├── /api/search      → SearchEngine                       │
-│       ├── /api/suggestions → KeywordSuggester                   │
-│       ├── /api/subpages    → SubPageNode                        │
-│       ├── /api/related     → Related Searches                   │
-│       └── /api/categories  → Categories                         │
-├─────────────────────────────────────────────────────────────────┤
-│  Core Modules:                                                  │
-│  SearchEngine │ RankCalculator │ TFIDFCalculator │ WebCrawler   │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Google Custom Search API                     │
-└─────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 專案結構
-```
-DS_Project/
-├── src/main/java/app/
-│   ├── bl/                    # Business Logic
-│   │   ├── SearchEngine.java      # 搜尋引擎核心
-│   │   ├── RankCalculator.java    # 排名計算器
-│   │   ├── TFIDFCalculator.java   # TF-IDF 演算法
-│   │   ├── WebCrawler.java        # 網頁爬蟲
-│   │   ├── Deduplicator.java      # 去重處理
-│   │   ├── EventInfoExtractor.java # 活動資訊提取
-│   │   └── KeywordSuggester.java  # 關鍵字建議
-│   ├── da/                    # Data Access
-│   │   ├── GoogleConnector.java   # Google API 連接
-│   │   └── Config.java            # 設定管理
-│   └── web/
-│       └── SimpleServer.java      # HTTP 伺服器
-├── frontend/                  # React 前端
-│   ├── src/
-│   │   ├── App.jsx
-│   │   ├── i18n.js
-│   │   └── components/
-│   ├── package.json
-│   └── vite.config.js
-├── pom.xml
-├── .env.example
-└── README.md
-```
-
----
-
-## 快速開始
-
-### 環境需求
-
-- Java 17+
-- Node.js 18+
-- Maven 3.6+
-- Google Custom Search API Key
-
-### 安裝步驟
-
-#### 1. Clone 專案
-```bash
+\`\`\`bash
+# 1. 克隆項目
 git clone https://github.com/Fengjui1226/DS_Project.git
 cd DS_Project
-```
 
-#### 2. 設定環境變數
-```bash
-cp .env.example .env
-# 編輯 .env 填入你的 Google API Key
-```
+# 2. 一鍵部署
+./deploy.sh
 
-#### 3. 啟動後端
-```bash
-mvn clean compile exec:java -Dexec.mainClass="app.web.SimpleServer"
-```
+# 3. 訪問應用
+open http://localhost
+\`\`\`
 
-#### 4. 啟動前端
-```bash
-cd frontend
-npm install
-npm run dev
-```
+### 手動部署
 
-#### 5. 開啟瀏覽器
-```
-http://localhost:3000
-```
+查看 [START_GUIDE.md](START_GUIDE.md) 獲取詳細說明。
 
----
+## 📖 API 文檔
 
-## API 文件
+### 搜尋活動
+\`\`\`http
+GET /api/search?query=音樂&city=台北&page=1
+\`\`\`
 
-### 搜尋 API
-```http
-GET /api/search?query={關鍵字}&city={城市}&page={頁碼}
-```
+### 獲取分類
+\`\`\`http
+GET /api/categories
+\`\`\`
 
-| 參數 | 類型 | 必填 | 說明 |
-|------|------|------|------|
-| query | string | ✅ | 搜尋關鍵字 |
-| city | string | ❌ | 城市篩選（預設：台北） |
-| page | number | ❌ | 頁碼（預設：1） |
+### 健康檢查
+\`\`\`http
+GET /health
+\`\`\`
 
-### 其他 API
+完整API文檔請查看 [API.md](docs/API.md)
 
-| 端點 | 說明 |
-|------|------|
-| `GET /api/suggestions?query={q}` | 搜尋建議 |
-| `GET /api/related?query={q}` | 相關搜尋 |
-| `GET /api/health` | 健康檢查 |
+## 🏗️ 技術架構
 
----
+- **後端**: Java 17 + HttpServer + Gson + Jsoup
+- **前端**: React 18 + Vite
+- **部署**: Docker + Nginx + Docker Compose
 
-## 使用的資料結構
+## 📂 項目結構
 
-| 資料結構 | 用途 | 時間複雜度 |
-|---------|------|-----------|
-| `ArrayList` | 儲存搜尋結果 | O(1) 查找 |
-| `HashMap` | TF-IDF 詞頻統計、快取 | O(1) 查找 |
-| `HashSet` | URL 去重 | O(1) 查找 |
-| `PriorityQueue` | 排名排序 | O(log n) 插入 |
+\`\`\`
+DS_Project/
+├── src/main/java/app/       # Java後端
+├── frontend/                 # React前端
+├── lib/                      # 依賴庫
+├── Dockerfile                # Docker鏡像
+├── docker-compose.yml        # 服務編排
+├── deploy.sh                 # 部署腳本
+└── README.md                 # 本文件
+\`\`\`
 
----
+## 🐳 Docker 命令
 
-## 開發團隊
+\`\`\`bash
+# 構建並啟動
+./deploy.sh
 
-- **劉豐睿** - 國立政治大學 資訊管理學系
-- **鄭子誼** - 國立政治大學 地政學系（雙主修資訊管理學系）
-- **何凱榆** - 國立政治大學 資訊管理學系
-- **林宣岑** - 國立政治大學 資訊管理學系
-- **許伃萱** - 國立政治大學 資訊管理學系
+# 單獨命令
+docker-compose build   # 構建鏡像
+docker-compose up -d   # 啟動服務
+docker-compose logs -f # 查看日誌
+docker-compose down    # 停止服務
+\`\`\`
 
----
+## ⚙️ 配置
 
-## 授權
+生產環境配置請查看：
+- [config.properties](src/main/resources/config.properties)
+- [nginx.conf](nginx.conf)
+- [docker-compose.yml](docker-compose.yml)
 
-本專案採用 MIT 授權條款 - 詳見 [LICENSE](LICENSE) 檔案。
+## 🔒 安全措施
 
----
+- ✅ CORS 配置
+- ✅ 速率限制
+- ✅ 輸入驗證
+- ✅ XSS 防護
+- ✅ 非 root 用戶
 
-*本專案為 114-1 學期資料結構期末專案*
+## 📝 文檔
+
+- [快速開始指南](START_GUIDE.md)
+- [連接問題修復](CONNECTION_FIXED.md)
+- [部署文檔](docs/DEPLOYMENT.md)
+- [貢獻指南](CONTRIBUTING.md)
+
+## 📄 授權
+
+MIT License
+
+## 🙏 致謝
+
+Built with ❤️ for Taiwan 🇹🇼
