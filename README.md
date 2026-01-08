@@ -1,6 +1,6 @@
 # 🎪 EventFinder - 台灣活動搜尋引擎
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![授權: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Java](https://img.shields.io/badge/Java-17-orange.svg)](https://openjdk.org/)
 [![React](https://img.shields.io/badge/React-18.2-blue.svg)](https://reactjs.org/)
 
@@ -21,8 +21,8 @@
 
 ### 使用 Docker（推薦）
 
-\`\`\`bash
-# 1. 克隆項目
+```bash
+# 1. 克隆專案
 git clone https://github.com/Fengjui1226/DS_Project.git
 cd DS_Project
 
@@ -31,30 +31,30 @@ cd DS_Project
 
 # 3. 訪問應用
 open http://localhost
-\`\`\`
+```
 
 ### 手動部署
 
-查看 [START_GUIDE.md](START_GUIDE.md) 獲取詳細說明。
+查看 [快速開始指南](START_GUIDE.md) 獲取詳細說明。
 
-## 📖 API 文檔
+## 📖 應用程式介面文檔
 
 ### 搜尋活動
-\`\`\`http
+```http
 GET /api/search?query=音樂&city=台北&page=1
-\`\`\`
+```
 
 ### 獲取分類
-\`\`\`http
+```http
 GET /api/categories
-\`\`\`
+```
 
 ### 健康檢查
-\`\`\`http
+```http
 GET /health
-\`\`\`
+```
 
-完整API文檔請查看 [API.md](docs/API.md)
+完整說明請查看 [應用程式介面文檔](docs/API.md)
 
 ## 🏗️ 技術架構
 
@@ -62,9 +62,9 @@ GET /health
 - **前端**: React 18 + Vite
 - **部署**: Docker + Nginx + Docker Compose
 
-## 📂 項目結構
+## 📂 專案結構
 
-\`\`\`
+```
 DS_Project/
 ├── src/main/java/app/       # Java後端
 ├── frontend/                 # React前端
@@ -73,27 +73,27 @@ DS_Project/
 ├── docker-compose.yml        # 服務編排
 ├── deploy.sh                 # 部署腳本
 └── README.md                 # 本文件
-\`\`\`
+```
 
-## 🐳 Docker 命令
+## 🐳 Docker 指令
 
-\`\`\`bash
+```bash
 # 構建並啟動
 ./deploy.sh
 
-# 單獨命令
+# 單獨指令
 docker-compose build   # 構建鏡像
 docker-compose up -d   # 啟動服務
 docker-compose logs -f # 查看日誌
 docker-compose down    # 停止服務
-\`\`\`
+```
 
 ## ⚙️ 配置
 
 生產環境配置請查看：
-- [config.properties](src/main/resources/config.properties)
-- [nginx.conf](nginx.conf)
-- [docker-compose.yml](docker-compose.yml)
+- [配置檔案](src/main/resources/config.properties)
+- [Nginx配置](nginx.conf)
+- [Docker編排配置](docker-compose.yml)
 
 ## 🔒 安全措施
 
@@ -101,19 +101,25 @@ docker-compose down    # 停止服務
 - ✅ 速率限制
 - ✅ 輸入驗證
 - ✅ XSS 防護
-- ✅ 非 root 用戶
+- ✅ 非 root 使用者運行
 
-## 📝 文檔
+## 📝 相關文檔
 
 - [快速開始指南](START_GUIDE.md)
+- [快速啟動參考](QUICK_START.md)
 - [連接問題修復](CONNECTION_FIXED.md)
 - [部署文檔](docs/DEPLOYMENT.md)
-- [貢獻指南](CONTRIBUTING.md)
+- [上架檢查清單](PRODUCTION_CHECKLIST.md)
+- [子網頁功能說明](SUBPAGE_FEATURE.md)
+
+## 🤝 貢獻
+
+歡迎提交問題和拉取請求！
 
 ## 📄 授權
 
-MIT License
+MIT 授權條款
 
 ## 🙏 致謝
 
-Built with ❤️ for Taiwan 🇹🇼
+用 ❤️ 為台灣打造 🇹🇼
