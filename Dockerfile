@@ -4,10 +4,18 @@ FROM eclipse-temurin:17-jdk-alpine AS builder
 # 設定工作目錄
 WORKDIR /build
 
-# 複製源代碼和依賴配置
-COPY pom.xml ./
+# 安裝 wget（用於下載依賴）
+RUN apk add --no-cache wget
+
+# 下載依賴（不依賴本地 lib 目錄）
+RUN mkdir -p lib && \
+    wget -q -O lib/gson-2.10.1.jar \
+    https://repo1.maven.org/maven2/com/google/code/gson/gson/2.10.1/gson-2.10.1.jar && \
+    wget -q -O lib/jsoup-1.17.2.jar \
+    https://repo1.maven.org/maven2/org/jsoup/jsoup/1.17.2/jsoup-1.17.2.jar
+
+# 複製源代碼
 COPY src ./src
-COPY lib ./lib
 
 # 手動編譯（不依賴 Maven）
 RUN mkdir -p target/classes && \
@@ -20,6 +28,9 @@ FROM eclipse-temurin:17-jre-alpine
 
 # 設定工作目錄
 WORKDIR /app
+
+# 安裝 wget（用於健康檢查）
+RUN apk add --no-cache wget
 
 # 複製編譯好的 class 文件和依賴
 COPY --from=builder /build/target/classes ./target/classes
