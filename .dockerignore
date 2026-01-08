@@ -1,42 +1,11 @@
-# Git
-.git
+# 忽略不需要的文件，加快構建速度
+target/
+frontend/node_modules/
+frontend/dist/
+.git/
 .gitignore
-.github
-
-# Node.js
-frontend/node_modules
-frontend/dist
-frontend/.vite
-
-# Java
-target
-*.class
-*.jar
-*.war
-
-# Logs
-*.log
-logs
-
-# IDE
-.idea
-.vscode
-*.iml
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Documentation (不需要打包進鏡像)
 *.md
-docs
-
-# Scripts (開發用)
-*.sh
-!deploy.sh
-
-# 其他
+*.log
 .env
-.env.local
-*.zip
-*.tar.gz
+.DS_Store
+backend.log
