@@ -21,12 +21,10 @@ export default defineConfig({
   build: {
     // 生產環境優化
     target: 'es2015',
-    minify: 'terser',
-    terserOptions: {
-      compress: {
-        drop_console: true,  // 移除console.log
-        drop_debugger: true
-      }
+    minify: 'esbuild', // 使用 esbuild（Vite 內建，無需額外依賴）
+    // 移除 console.log 和 debugger
+    esbuild: {
+      drop: ['console', 'debugger']
     },
     rollupOptions: {
       output: {
