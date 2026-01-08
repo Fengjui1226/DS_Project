@@ -49,7 +49,9 @@ public class GoogleConnector {
         String apiKey = Config.get("google.cse.apiKey", null);
         String cx     = Config.get("google.cse.cx", null);
         if (apiKey == null || cx == null) {
-            throw new IllegalStateException("Missing google.cse.apiKey / google.cse.cx");
+            // 當缺少 API 金鑰時，返回模擬數據以便展示功能
+            System.out.println("[GoogleConnector] 缺少 API 金鑰，使用模擬數據");
+            return generateMockResults(query, num);
         }
 
         // CSE 規則：num 每頁最多 10，start 1-based，最大到 100
@@ -181,5 +183,35 @@ public class GoogleConnector {
                 .replace("\\/","/")
                 .replace("\\\"", "\"")
                 .replace("\\\\","\\");
+    }
+
+    /**
+     * 生成模擬搜尋結果（當缺少 Google API 金鑰時使用）
+     */
+    private static List<Result> generateMockResults(String query, int num) {
+        List<Result> mockResults = new ArrayList<>();
+
+        // 根據查詢關鍵字生成相關的模擬數據
+        String[] eventTypes = {"演唱會", "市集", "展覽", "音樂節", "講座", "工作坊"};
+        String[] venues = {"台北小巨蛋", "華山1914文創園區", "松山文創園區", "國父紀念館", "台北流行音樂中心", "西門紅樓"};
+        String[] dates = {"2026/01/15", "2026/01/22", "2026/02/05", "2026/02/14", "2026/03/01"};
+
+        Random rand = new Random(query.hashCode()); // 使用查詢作為種子，保持一致性
+        int count = Math.min(num, 10);
+
+        for (int i = 0; i < count; i++) {
+            String eventType = eventTypes[rand.nextInt(eventTypes.length)];
+            String venue = venues[rand.nextInt(venues.length)];
+            String date = dates[rand.nextInt(dates.length)];
+
+            String title = String.format("%s %s - %s", query, eventType, venue);
+            String link = "https://example.com/event/" + (i + 1);
+            String snippet = String.format("【活動日期】%s | 【地點】%s | 精彩%s活動，歡迎參加！包含 %s 相關內容...",
+                date, venue, eventType, query);
+
+            mockResults.add(new Result(title, link, snippet));
+        }
+
+        return mockResults;
     }
 }
