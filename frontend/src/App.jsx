@@ -10,7 +10,10 @@ import LanguageSelector from './components/LanguageSelector';
 import RelatedSearches from './components/RelatedSearches';
 import './index.css';
 
-const API_BASE = '/api'; // 你後端有向後相容 /api/*，這樣前端不用大改
+// API基礎URL - 開發環境使用代理，生產環境使用環境變量
+const API_BASE = import.meta.env.PROD
+  ? (import.meta.env.VITE_API_BASE_URL || 'https://your-backend-url.onrender.com') + '/api'
+  : '/api';
 
 const cities = {
   'zh-TW': ['台北', '新北', '桃園', '台中', '台南', '高雄', '基隆', '新竹', '苗栗', '彰化', '南投', '雲林', '嘉義', '屏東', '宜蘭', '花蓮', '台東'],
