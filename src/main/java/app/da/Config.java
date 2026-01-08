@@ -32,12 +32,39 @@ public final class Config {
      */
     public static String get(String key, String def) {
         if (key == null) return def;
-        String envKey = key.replace('.', '_').toUpperCase();
+
+        // 將駝峰命名轉換為環境變數格式
+        // 例如：google.cse.apiKey → GOOGLE_CSE_API_KEY
+        String envKey = camelToEnvVar(key);
         String v = System.getenv(envKey);
         if (v != null && !v.isBlank()) return v;
+
         String p = P.getProperty(key);
         if (p != null && !p.isBlank()) return p;
         return def;
+    }
+
+    /**
+     * 將 camelCase 轉換為 SCREAMING_SNAKE_CASE
+     * 例如：google.cse.apiKey → GOOGLE_CSE_API_KEY
+     */
+    private static String camelToEnvVar(String key) {
+        StringBuilder result = new StringBuilder();
+        for (int i = 0; i < key.length(); i++) {
+            char c = key.charAt(i);
+            if (c == '.') {
+                result.append('_');
+            } else if (Character.isUpperCase(c)) {
+                // 在大寫字母前加下劃線（除非是第一個字符）
+                if (i > 0 && result.charAt(result.length() - 1) != '_') {
+                    result.append('_');
+                }
+                result.append(c);
+            } else {
+                result.append(Character.toUpperCase(c));
+            }
+        }
+        return result.toString();
     }
 
     /** 方便取得 boolean */
