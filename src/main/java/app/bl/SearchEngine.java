@@ -83,7 +83,7 @@ public class SearchEngine {
         // 4. 呼叫 Google API
         System.out.println("\n[Step 1] 呼叫 Google API...");
         List<GoogleConnector.Result> googleResults =
-                GoogleConnector.search(refinedQuery, MAX_GOOGLE_RESULTS, 3000);
+                GoogleConnector.search(refinedQuery, MAX_GOOGLE_RESULTS, 15000);  // 增加到 15 秒
         System.out.println("[Google] 取得 " + googleResults.size() + " 個結果");
 
         // 5. 建立初步節點
@@ -191,8 +191,8 @@ public class SearchEngine {
             System.out.println("[Iteration] 擴展搜尋: " + newQuery);
             
             try {
-                List<GoogleConnector.Result> results = 
-                    GoogleConnector.search(refineQuery(newQuery), 10, 2000);
+                List<GoogleConnector.Result> results =
+                    GoogleConnector.search(refineQuery(newQuery), 10, 15000);  // 增加到 15 秒
                 List<String> newTokens = parseQueryTokens(newQuery);
                 
                 for (GoogleConnector.Result r : results) {

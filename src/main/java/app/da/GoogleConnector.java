@@ -57,6 +57,19 @@ public class GoogleConnector {
             throw new IllegalStateException("Missing google.cse.apiKey / google.cse.cx");
         }
 
+        // 驗證格式（輸出前3和後3字符用於驗證）
+        System.out.println("[GoogleConnector] API Key 前3字: " + apiKey.substring(0, Math.min(3, apiKey.length())));
+        System.out.println("[GoogleConnector] API Key 長度: " + apiKey.length());
+        System.out.println("[GoogleConnector] CX 值: " + cx);
+        System.out.println("[GoogleConnector] CX 長度: " + cx.length());
+
+        if (apiKey.length() < 20) {
+            System.out.println("[GoogleConnector] 警告: API Key 長度異常 (< 20)");
+        }
+        if (cx.length() < 5) {
+            System.out.println("[GoogleConnector] 警告: CX 長度異常 (< 5)");
+        }
+
         // CSE 規則：num 每頁最多 10，start 1-based，最大到 100
         int targetTotal = Math.min(num, 100);
         int remaining   = targetTotal;
@@ -75,16 +88,92 @@ public class GoogleConnector {
                     + "&start=" + startIndex
                     + "&q=" + q;
 
+            // 調試：輸出請求信息（隱藏完整 API Key）
+            String maskedUrl = url.replaceAll("key=[^&]+", "key=***");
+            System.out.println("[GoogleConnector] 準備請求 Google API...");
+            System.out.println("[GoogleConnector] 請求 URL: " + maskedUrl);
+            System.out.println("[GoogleConnector] 原始 Timeout: " + timeoutMillis + "ms");
+
+            // 使用更長的 timeout（至少 10 秒）
+            int actualTimeout = Math.max(timeoutMillis, 10000);
+            System.out.println("[GoogleConnector] 實際 Timeout: " + actualTimeout + "ms");
+
+            System.out.println("[GoogleConnector] 正在建立 HTTP 請求...");
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(Duration.ofMillis(timeoutMillis))
+                    .timeout(Duration.ofMillis(actualTimeout))
+                    .header("User-Agent", "EventFinder/1.0")
                     .GET()
                     .build();
 
-            HttpResponse<String> resp = CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
+            System.out.println("[GoogleConnector] 正在發送請求到 Google API...");
+            long startTime = System.currentTimeMillis();
+
+            HttpResponse<String> resp;
+            try {
+                resp = CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
+                long elapsed = System.currentTimeMillis() - startTime;
+                System.out.println("[GoogleConnector] 請求完成，耗時: " + elapsed + "ms");
+            } catch (java.net.http.HttpConnectTimeoutException e) {
+                long elapsed = System.currentTimeMillis() - startTime;
+                String errorMsg = "[GoogleConnector] ⚠️ HTTP 連線超時";
+                System.out.println(errorMsg);
+                System.out.println("[GoogleConnector] 超時詳情: timeout=" + actualTimeout + "ms, 實際耗時=" + elapsed + "ms");
+                System.out.println("[GoogleConnector] 目標主機: www.googleapis.com");
+                System.out.println("[GoogleConnector] 異常類型: " + e.getClass().getName());
+                System.out.println("[GoogleConnector] 異常訊息: " + e.getMessage());
+
+                if (all.isEmpty()) {
+                    String diagnosis = "\n可能原因:\n" +
+                                     "1. 服務器無法訪問 Google API (防火牆/網路限制)\n" +
+                                     "2. API Key 無效: " + apiKey.substring(0, 3) + "..." + "\n" +
+                                     "3. CX 無效: " + cx;
+                    throw new RuntimeException(errorMsg + diagnosis, e);
+                } else {
+                    System.out.println("[GoogleConnector] 先用目前已取得的 " + all.size() + " 筆");
+                    break;
+                }
+            } catch (java.net.UnknownHostException e) {
+                String errorMsg = "[GoogleConnector] ⚠️ 無法解析主機名稱 (DNS 錯誤)";
+                System.out.println(errorMsg);
+                System.out.println("[GoogleConnector] 主機: www.googleapis.com");
+                throw new RuntimeException(errorMsg + " - 服務器可能無法訪問外部網路", e);
+            } catch (java.io.IOException e) {
+                long elapsed = System.currentTimeMillis() - startTime;
+                String errorMsg = "[GoogleConnector] ⚠️ IO 錯誤";
+                System.out.println(errorMsg);
+                System.out.println("[GoogleConnector] 耗時: " + elapsed + "ms");
+                System.out.println("[GoogleConnector] 異常: " + e.getClass().getName() + ": " + e.getMessage());
+
+                if (all.isEmpty()) {
+                    throw new RuntimeException(errorMsg + ": " + e.getMessage(), e);
+                } else {
+                    System.out.println("[GoogleConnector] 先用目前已取得的 " + all.size() + " 筆");
+                    break;
+                }
+            } catch (Exception e) {
+                long elapsed = System.currentTimeMillis() - startTime;
+                String errorMsg = "[GoogleConnector] ⚠️ 請求失敗";
+                System.out.println(errorMsg);
+                System.out.println("[GoogleConnector] 耗時: " + elapsed + "ms");
+                System.out.println("[GoogleConnector] 異常類型: " + e.getClass().getName());
+                System.out.println("[GoogleConnector] 異常訊息: " + e.getMessage());
+                e.printStackTrace();
+
+                if (all.isEmpty()) {
+                    throw new RuntimeException(errorMsg + ": " + e.getMessage(), e);
+                } else {
+                    break;
+                }
+            }
+
             if (resp.statusCode() != 200) {
+                String errorBody = resp.body();
+                System.out.println("[GoogleConnector] HTTP " + resp.statusCode() + " 錯誤回應: " +
+                        (errorBody.length() > 500 ? errorBody.substring(0, 500) + "..." : errorBody));
+
                 // 若第一頁就錯，直接丟出錯誤；如果是後面的頁數錯，就先用目前拿到的結果
                 if (all.isEmpty()) {
-                    throw new RuntimeException("CSE HTTP " + resp.statusCode() + ": " + resp.body());
+                    throw new RuntimeException("CSE HTTP " + resp.statusCode() + ": " + errorBody);
                 } else {
                     System.out.println("[GoogleConnector] 後續頁面 HTTP " + resp.statusCode() +
                             "，先用目前已取得的 " + all.size() + " 筆");
