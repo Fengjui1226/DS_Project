@@ -48,6 +48,11 @@ public class GoogleConnector {
 
         String apiKey = Config.get("google.cse.apiKey", null);
         String cx     = Config.get("google.cse.cx", null);
+
+        // 調試：輸出環境變數狀態
+        System.out.println("[GoogleConnector] API Key 狀態: " + (apiKey != null ? "已設定" : "未設定"));
+        System.out.println("[GoogleConnector] CX 狀態: " + (cx != null ? "已設定" : "未設定"));
+
         if (apiKey == null || cx == null) {
             throw new IllegalStateException("Missing google.cse.apiKey / google.cse.cx");
         }
