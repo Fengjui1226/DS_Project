@@ -57,6 +57,14 @@ public class GoogleConnector {
             throw new IllegalStateException("Missing google.cse.apiKey / google.cse.cx");
         }
 
+        // 驗證格式
+        if (apiKey.length() < 20) {
+            System.out.println("[GoogleConnector] 警告: API Key 長度異常 (< 20)");
+        }
+        if (cx.length() < 5) {
+            System.out.println("[GoogleConnector] 警告: CX 長度異常 (< 5)");
+        }
+
         // CSE 規則：num 每頁最多 10，start 1-based，最大到 100
         int targetTotal = Math.min(num, 100);
         int remaining   = targetTotal;
@@ -75,16 +83,49 @@ public class GoogleConnector {
                     + "&start=" + startIndex
                     + "&q=" + q;
 
+            // 調試：輸出請求信息（隱藏完整 API Key）
+            String maskedUrl = url.replaceAll("key=[^&]+", "key=***");
+            System.out.println("[GoogleConnector] 請求 URL: " + maskedUrl);
+            System.out.println("[GoogleConnector] Timeout: " + timeoutMillis + "ms");
+
+            // 使用更長的 timeout（至少 10 秒）
+            int actualTimeout = Math.max(timeoutMillis, 10000);
+
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(Duration.ofMillis(timeoutMillis))
+                    .timeout(Duration.ofMillis(actualTimeout))
                     .GET()
                     .build();
 
-            HttpResponse<String> resp = CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp;
+            try {
+                resp = CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
+            } catch (java.net.http.HttpConnectTimeoutException e) {
+                String errorMsg = "[GoogleConnector] 連線超時 (timeout=" + actualTimeout + "ms)";
+                System.out.println(errorMsg);
+                if (all.isEmpty()) {
+                    throw new RuntimeException(errorMsg + " - 請檢查: 1) API Key 是否正確 2) CX 是否正確 3) 網路連線", e);
+                } else {
+                    System.out.println("[GoogleConnector] 先用目前已取得的 " + all.size() + " 筆");
+                    break;
+                }
+            } catch (Exception e) {
+                String errorMsg = "[GoogleConnector] 請求失敗: " + e.getMessage();
+                System.out.println(errorMsg);
+                if (all.isEmpty()) {
+                    throw new RuntimeException(errorMsg, e);
+                } else {
+                    break;
+                }
+            }
+
             if (resp.statusCode() != 200) {
+                String errorBody = resp.body();
+                System.out.println("[GoogleConnector] HTTP " + resp.statusCode() + " 錯誤回應: " +
+                        (errorBody.length() > 500 ? errorBody.substring(0, 500) + "..." : errorBody));
+
                 // 若第一頁就錯，直接丟出錯誤；如果是後面的頁數錯，就先用目前拿到的結果
                 if (all.isEmpty()) {
-                    throw new RuntimeException("CSE HTTP " + resp.statusCode() + ": " + resp.body());
+                    throw new RuntimeException("CSE HTTP " + resp.statusCode() + ": " + errorBody);
                 } else {
                     System.out.println("[GoogleConnector] 後續頁面 HTTP " + resp.statusCode() +
                             "，先用目前已取得的 " + all.size() + " 筆");
