@@ -12,7 +12,7 @@ import './index.css';
 
 // API基礎URL - 開發環境使用代理，生產環境使用環境變量
 const API_BASE = import.meta.env.PROD
-  ? (import.meta.env.VITE_API_BASE_URL || 'https://your-backend-url.onrender.com') + '/api'
+  ? (import.meta.env.VITE_API_BASE_URL || 'https://ds-project-o9lk.onrender.com') + '/api'
   : '/api';
 
 const cities = {
