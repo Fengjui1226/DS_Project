@@ -75,18 +75,22 @@ public class GoogleConnector {
         int remaining   = targetTotal;
         int startIndex  = 1;
 
-        String q = URLEncoder.encode(query, StandardCharsets.UTF_8);
         List<Result> all = new ArrayList<>();
 
         while (remaining > 0 && startIndex <= 100) {
             int pageSize = Math.min(remaining, 10);  // 單頁最多 10
 
+            // 正確編碼查詢參數（URLEncoder 會把空格編碼為 +，需要再轉換為 %20）
+            String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8).replace("+", "%20");
+            String encodedApiKey = URLEncoder.encode(apiKey, StandardCharsets.UTF_8);
+            String encodedCx = URLEncoder.encode(cx, StandardCharsets.UTF_8);
+
             String url = "https://www.googleapis.com/customsearch/v1"
-                    + "?key=" + apiKey
-                    + "&cx=" + cx
+                    + "?key=" + encodedApiKey
+                    + "&cx=" + encodedCx
                     + "&num=" + pageSize
                     + "&start=" + startIndex
-                    + "&q=" + q;
+                    + "&q=" + encodedQuery;
 
             // 調試：輸出請求信息（隱藏完整 API Key）
             String maskedUrl = url.replaceAll("key=[^&]+", "key=***");
