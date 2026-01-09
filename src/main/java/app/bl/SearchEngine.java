@@ -34,13 +34,13 @@ public class SearchEngine {
 
     // ★ 參數設定
     private static final int MAX_GOOGLE_RESULTS = 20;
-    private static final int MAX_DEEP_CRAWL_COUNT = 20;
+    private static final int MAX_DEEP_CRAWL_COUNT = 5;  // 減少爬取數量以符合 Render 30秒限制
     private static final boolean ENABLE_CRAWLING = true;
-    private static final int SEARCH_TIMEOUT_MS = 20000;
-    private static final int CRAWL_PARALLEL_LIMIT = 15;
-    
+    private static final int SEARCH_TIMEOUT_MS = 12000;  // 縮短超時時間
+    private static final int CRAWL_PARALLEL_LIMIT = 5;   // 減少並行數量
+
     // ★ 迭代搜尋設定
-    private static final boolean ENABLE_ITERATIVE_SEARCH = true;
+    private static final boolean ENABLE_ITERATIVE_SEARCH = false;  // 暫時關閉迭代搜尋以節省時間
     private static final int MAX_ITERATIONS = 2;
     private static final int MIN_RESULTS_FOR_ITERATION = 8;
     
