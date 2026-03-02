@@ -29,6 +29,40 @@ const cityMapping = {
   '타이베이': '台北', '신베이': '新北', '타오위안': '桃園', '타이중': '台中'
 };
 
+// ============ 地理位置工具 ============
+
+const CITY_COORDS_ZH = {
+  '台北': [25.0330, 121.5654], '新北': [24.9936, 121.4617],
+  '桃園': [24.9936, 121.3010], '台中': [24.1477, 120.6736],
+  '台南': [22.9999, 120.2269], '高雄': [22.6273, 120.3014],
+  '基隆': [25.1276, 121.7392], '新竹': [24.8138, 120.9675],
+  '苗栗': [24.5602, 120.8214], '彰化': [24.0796, 120.5362],
+  '南投': [23.9609, 120.9718], '雲林': [23.7092, 120.4313],
+  '嘉義': [23.4801, 120.4491], '屏東': [22.6726, 120.4871],
+  '宜蘭': [24.7021, 121.7377], '花蓮': [23.9872, 121.6016],
+  '台東': [22.7583, 121.1444],
+};
+
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180)
+    * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function nearestZhCity(lat, lng) {
+  let nearest = '台北';
+  let minDist = Infinity;
+  for (const [city, [clat, clng]] of Object.entries(CITY_COORDS_ZH)) {
+    const dist = haversineKm(lat, lng, clat, clng);
+    if (dist < minDist) { minDist = dist; nearest = city; }
+  }
+  return nearest;
+}
+
 // ============ 穩定性工具函數 ============
 
 // 防抖動
@@ -101,6 +135,9 @@ export default function App() {
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
+
+  // GPS 座標（傳給後端做距離排序）
+  const [userCoords, setUserCoords] = useState(null);
 
   // 彈窗 & 建議
   const [subpageModal, setSubpageModal] = useState({ open: false, domain: '', data: null });
@@ -244,8 +281,11 @@ export default function App() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000); // ✅ 15 秒
 
+      const coordsParam = userCoords
+        ? `&lat=${userCoords.lat}&lng=${userCoords.lng}`
+        : '';
       const res = await fetch(
-        `${API_BASE}/search?query=${encodeURIComponent(q)}&city=${encodeURIComponent(apiCity)}&page=${page}`,
+        `${API_BASE}/search?query=${encodeURIComponent(q)}&city=${encodeURIComponent(apiCity)}&page=${page}${coordsParam}`,
         { signal: controller.signal }
       );
 
@@ -324,10 +364,10 @@ export default function App() {
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const { latitude: lat, longitude: lng } = pos.coords;
-        let detected = cities[lang][0];
-        if (lat > 25.0 && lng > 121.4 && lng < 121.7) detected = cities[lang][0]; // 台北
-        else if (lat > 24.0 && lat < 24.3) detected = cities[lang][3]; // 台中
-        else if (lat > 22.5 && lat < 22.8) detected = cities[lang][5]; // 高雄
+        setUserCoords({ lat, lng });
+        const zhCity = nearestZhCity(lat, lng);
+        const zhIndex = cities['zh-TW'].indexOf(zhCity);
+        const detected = zhIndex >= 0 ? cities[lang][zhIndex] : cities[lang][0];
         setCity(detected);
       },
       () => {}

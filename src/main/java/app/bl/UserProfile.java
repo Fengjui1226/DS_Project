@@ -12,6 +12,14 @@ public class UserProfile {
     public void setUserCity(String city) { this.userCity = city; }
     public String getUserCity() { return userCity; }
 
+    // 使用者 GPS 座標（Haversine 距離排序用）
+    private double userLat = Double.NaN;
+    private double userLng = Double.NaN;
+    public void setUserCoords(double lat, double lng) { this.userLat = lat; this.userLng = lng; }
+    public double getUserLat() { return userLat; }
+    public double getUserLng() { return userLng; }
+    public boolean hasCoords() { return !Double.isNaN(userLat) && !Double.isNaN(userLng); }
+
     // 近期行為（常搜/常點）with timestamps
     private final Map<String, Integer> habit = new HashMap<>();
     private final Map<String, LocalDateTime> lastSearchTime = new HashMap<>();

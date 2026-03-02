@@ -41,7 +41,7 @@ public class SearchEngine {
 
     // ★ 迭代搜尋設定
     private static final boolean ENABLE_ITERATIVE_SEARCH = false;  // 暫時關閉迭代搜尋以節省時間
-    private static final int MAX_ITERATIONS = 2;
+    private static final int MAX_ITERATIONS = 1;           // 省掉第二輪 API 請求
     private static final int MIN_RESULTS_FOR_ITERATION = 8;
     
     private static final ExecutorService CRAWL_EXECUTOR =

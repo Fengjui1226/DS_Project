@@ -87,6 +87,27 @@ public final class CityConfig {
         Map.entry("文山區", new double[]{24.9889, 121.5703})
     );
 
+    // ==================== 17縣市中心座標 ====================
+    public static final Map<String, double[]> CITY_COORDS = Map.ofEntries(
+        Map.entry("台北", new double[]{25.0330, 121.5654}),
+        Map.entry("新北", new double[]{24.9936, 121.4617}),
+        Map.entry("桃園", new double[]{24.9936, 121.3010}),
+        Map.entry("台中", new double[]{24.1477, 120.6736}),
+        Map.entry("台南", new double[]{22.9999, 120.2269}),
+        Map.entry("高雄", new double[]{22.6273, 120.3014}),
+        Map.entry("基隆", new double[]{25.1276, 121.7392}),
+        Map.entry("新竹", new double[]{24.8138, 120.9675}),
+        Map.entry("苗栗", new double[]{24.5602, 120.8214}),
+        Map.entry("彰化", new double[]{24.0796, 120.5362}),
+        Map.entry("南投", new double[]{23.9609, 120.9718}),
+        Map.entry("雲林", new double[]{23.7092, 120.4313}),
+        Map.entry("嘉義", new double[]{23.4801, 120.4491}),
+        Map.entry("屏東", new double[]{22.6726, 120.4871}),
+        Map.entry("宜蘭", new double[]{24.7021, 121.7377}),
+        Map.entry("花蓮", new double[]{23.9872, 121.6016}),
+        Map.entry("台東", new double[]{22.7583, 121.1444})
+    );
+
     // ==================== 工具方法 ====================
 
     /**
@@ -147,5 +168,34 @@ public final class CityConfig {
      */
     public static String getCityByVenue(String venue) {
         return VENUE_CITY.get(venue);
+    }
+
+    /**
+     * Haversine 距離（公里）
+     */
+    public static double haversineKm(double lat1, double lng1, double lat2, double lng2) {
+        final double R = 6371.0;
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLng = Math.toRadians(lng2 - lng1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+                 + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
+                 * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+        return 2.0 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1.0 - a));
+    }
+
+    /**
+     * 從 GPS 座標找最近縣市
+     */
+    public static String nearestCity(double lat, double lng) {
+        String nearest = "台北";
+        double minDist = Double.MAX_VALUE;
+        for (Map.Entry<String, double[]> e : CITY_COORDS.entrySet()) {
+            double dist = haversineKm(lat, lng, e.getValue()[0], e.getValue()[1]);
+            if (dist < minDist) {
+                minDist = dist;
+                nearest = e.getKey();
+            }
+        }
+        return nearest;
     }
 }

@@ -15,6 +15,7 @@ import app.bl.InputValidator;
 import app.bl.Logger;
 import app.bl.PageNode;
 import app.bl.SearchEngine;
+import app.bl.config.CityConfig;
 import app.web.HttpUtil;
 import app.web.JsonUtil;
 import app.web.ServerContext;
@@ -84,6 +85,24 @@ public class SearchHandler implements HttpHandler {
             SessionManager.Session session = ctx.sessionManager.getSession(ex);
             session.profile.setUserCity(city);  // 設定使用者偏好的城市
             session.lastQuery = query;
+
+            // 解析 GPS 座標（前端定位後傳入）
+            String latStr = params.get("lat");
+            String lngStr = params.get("lng");
+            if (latStr != null && lngStr != null) {
+                try {
+                    double lat = Double.parseDouble(latStr);
+                    double lng = Double.parseDouble(lngStr);
+                    if (lat >= 21.0 && lat <= 26.5 && lng >= 119.0 && lng <= 122.5) {
+                        session.profile.setUserCoords(lat, lng);
+                        // 若 city 未明確指定，從 GPS 自動推斷
+                        if (city.isEmpty()) {
+                            String detected = CityConfig.nearestCity(lat, lng);
+                            session.profile.setUserCity(detected);
+                        }
+                    }
+                } catch (NumberFormatException ignored) {}
+            }
 
             // 執行搜尋邏輯
             List<PageNode> allResults = SearchEngine.search(query, session.profile);

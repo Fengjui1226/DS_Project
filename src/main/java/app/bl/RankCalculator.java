@@ -168,12 +168,30 @@ public class RankCalculator {
             }
         }
 
-        // 6. 城市匹配
+        // 6. 城市/距離匹配
         String userCity = (user != null) ? user.getUserCity() : null;
         String pageCity = p.getCity();
-        if (userCity != null && isNotEmpty(pageCity) && !"全台".equals(pageCity)) {
-            if (pageCity.equals(userCity)) multiplier *= M_CITY_MATCH;
-            else multiplier *= M_CITY_MISMATCH;
+        if (isNotEmpty(pageCity) && !"全台".equals(pageCity)) {
+            if (user != null && user.hasCoords()) {
+                // GPS 模式：Haversine 距離衰減乘數
+                double[] eventCoords = app.bl.config.CityConfig.CITY_COORDS.get(pageCity);
+                if (eventCoords != null) {
+                    double distKm = app.bl.config.CityConfig.haversineKm(
+                        user.getUserLat(), user.getUserLng(), eventCoords[0], eventCoords[1]);
+                    if      (distKm < 20)  multiplier *= 1.30;
+                    else if (distKm < 50)  multiplier *= 1.15;
+                    else if (distKm < 100) multiplier *= 1.00;
+                    else if (distKm < 200) multiplier *= 0.85;
+                    else                   multiplier *= 0.70;
+                } else if (userCity != null) {
+                    if (pageCity.equals(userCity)) multiplier *= M_CITY_MATCH;
+                    else multiplier *= M_CITY_MISMATCH;
+                }
+            } else if (userCity != null) {
+                // 舊版城市名稱模式（無 GPS 時 fallback）
+                if (pageCity.equals(userCity)) multiplier *= M_CITY_MATCH;
+                else multiplier *= M_CITY_MISMATCH;
+            }
         }
 
         return multiplier;
