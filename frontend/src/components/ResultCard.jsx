@@ -31,8 +31,6 @@ export default function ResultCard({ result, index, isFavorite, onToggleFavorite
           >
             📋
           </button>
-
-          <span className="score">{Number(result.score || 0).toFixed(1)}</span>
         </div>
       </div>
 
@@ -45,18 +43,7 @@ export default function ResultCard({ result, index, isFavorite, onToggleFavorite
       <div className="result-meta">
         {result.city && <span className="meta-tag">📍 {result.city}</span>}
         {result.eventDate && <span className="meta-tag">📅 {result.eventDate}</span>}
-
-        {/* ✅ 點 domain / 按鈕都用 result.url，後端才查得到 */}
-        <span
-          className="meta-tag domain-link"
-          onClick={() => onSubpageQuery(result.url)}
-          title={T('viewSubpages')}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => e.key === 'Enter' && onSubpageQuery(result.url)}
-        >
-          🌐 {result.domain}
-        </span>
+        <span className="meta-tag">🌐 {result.domain}</span>
       </div>
 
       {result.snippet && <p className="result-snippet">{result.snippet}</p>}
